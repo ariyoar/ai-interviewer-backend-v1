@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-const pdf = require('pdf-parse');
+const pdf = require('pdf-parse'); // Uses require to bypass TypeScript strict import checks
 import { generatePrimaryQuestions } from './openai'; // The "Brain" for questions
 import { RealtimeSession } from './realtime';        // The "Voice" loop
 
@@ -49,30 +49,47 @@ app.post('/api/session', async (req, res) => {
         
         console.log("📝 Received Session Request...");
 
-        // --- 🔍 PDF PARSING LOGIC START ---
-        // Default to the plain text provided, or empty string
-        let finalResumeText = resumeText || "";
+        // --- 🔍 ROBUST PDF PARSING LOGIC ---
+        let finalResumeText = "";
 
+        // 1. Priority: Try to parse the PDF File if sent (Best Source)
         if (resumeFile) {
             console.log("📂 PDF File detected. Extracting text...");
             try {
-                // 1. Convert Base64 string to a Buffer
                 const buffer = Buffer.from(resumeFile, 'base64');
-                
-                // 2. Extract text using pdf-parse
                 const pdfData = await pdf(buffer);
-                
-                // 3. Clean up the text (remove excessive newlines/spaces)
-                // This replaces multiple newlines with a single newline to make it readable for AI
-                finalResumeText = pdfData.text.replace(/\n\s*\n/g, '\n').trim(); 
-                
+                // Clean the text: remove repeated newlines and trim
+                finalResumeText = pdfData.text.replace(/\n\s*\n/g, '\n').trim();
                 console.log(`✅ PDF Extracted! Length: ${finalResumeText.length} chars`);
             } catch (err) {
-                console.error("❌ Failed to parse PDF:", err);
-                // If parsing fails, we fall back to whatever was in 'resumeText' or empty string
+                console.error("❌ PDF Parse failed:", err);
             }
         }
-        // --- 🔍 PDF PARSING LOGIC END ---
+
+        // 2. Fallback: Use resumeText ONLY if we didn't get text from the PDF
+        // AND if it doesn't look like garbage.
+        if (!finalResumeText && resumeText) {
+            // Calculated "validity score": ratio of alphanumeric chars vs total length.
+            // Garbage binary data usually has very few normal letters.
+            const cleanChars = resumeText.replace(/[^a-zA-Z0-9\s]/g, '').length;
+            const validRatio = cleanChars / resumeText.length;
+
+            // If more than 40% of the text is valid letters/numbers, we trust it.
+            // If it's mostly symbols (like the "x } [ - q" you saw), we ignore it.
+            if (validRatio > 0.4) {
+                finalResumeText = resumeText;
+                console.log("Using provided resumeText (seems valid).");
+            } else {
+                console.warn("⚠️ Ignoring corrupt/garbage frontend resume text.");
+            }
+        }
+        
+        // 3. Last Resort: If everything failed, use a placeholder so the AI doesn't crash
+        if (!finalResumeText) {
+            console.log("⚠️ No valid resume text found. Using placeholder.");
+            finalResumeText = "Candidate summary not available.";
+        }
+        // ----------------------------------------
 
         // 2. Create the session in DB
         const session = await prisma.interviewSession.create({
@@ -184,4 +201,3 @@ const PORT = process.env.PORT || 8080;
 server.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`✅ Server running on port ${PORT}`);
 });
-//

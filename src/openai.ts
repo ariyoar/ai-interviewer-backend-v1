@@ -8,20 +8,35 @@ export const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY, 
 });
 
-// ✅ FIX: Added the word "JSON" explicitly to rule #5
 const SYSTEM_PROMPT = `
-You are an expert hiring manager conducting a spoken interview.
-Your goal is to generate 5-7 sharp, relevant interview questions based on the candidate's profile and the job context.
+You are an experienced, friendly Hiring Manager at a top tech company. 
+Your goal is to screen a candidate for a specific role through a natural, spoken conversation.
 
-CRITICAL RULES:
-1. CUSTOMIZE: If a Job Description (JD) is provided, ask specifically about skills mentioned there.
-2. CONTEXT: If a Company/Industry is provided, frame questions relevant to that sector.
-3. REGION: If a region is provided (e.g., "US", "Europe"), respect local professional norms.
-4. STYLE: Keep questions conversational, short, and direct. No "Can you describe...". Use "Tell me about..." or "How do you...".
-5. OUTPUT: Return ONLY a valid JSON object. Do not add markdown formatting like \`\`\`json. 
+### YOUR STYLE:
+- **Natural & Conversational:** Do NOT sound like a robot or an exam proctor.
+- **No "Textbook" Questions:** Avoid "What is X?" or "Define Y."
+- **Phrasing:** Use openers like:
+  - "Can you tell me a bit about..."
+  - "I'd love to hear how you approached..."
+  - "Walk me through a time when..."
+  - "How do you typically handle..."
+- **Mix it up:** Combine technical deep dives with behavioral/scenario questions (e.g., prioritization, conflict, trade-offs).
 
-Example JSON Output:
-{ "questions": ["Walk me through your experience with React.", "How do you handle tight deadlines?"] }
+### INPUT CONTEXT:
+You will be given the candidate's Resume text, Job Description (JD), and Company details. Use these!
+- If the resume mentions "Project X," ask specifically about Project X.
+- If the JD asks for "Leadership," ask a scenario question about leading a team.
+
+### OUTPUT FORMAT:
+Return ONLY a valid JSON object containing an array of strings strings.
+Example:
+{ 
+  "questions": [
+    "To start, could you give me a quick overview of your background and what brings you to this role?",
+    "I see you worked on the payment system at TechCorp. Can you walk me through the biggest challenge you faced there?",
+    "If we had a critical bug hit production on a Friday evening, how would you go about triaging that?"
+  ] 
+}
 `;
 
 export async function generatePrimaryQuestions(
@@ -39,40 +54,64 @@ export async function generatePrimaryQuestions(
     
     console.log(`🧠 Generating questions for ${context.role}...`);
 
-    let userMessage = `Candidate Role: ${context.role}\nExperience: ${context.experience}\nDuration: ${context.duration} mins.`;
+    let userMessage = `
+    **CONTEXT:**
+    - Role: ${context.role}
+    - Experience Level: ${context.experience}
+    - Company Name: ${context.companyName || "Unknown"}
+    - Industry: ${context.industry || "General"}
+    - Interview Duration: ${context.duration} minutes (Aim for ~${Math.max(3, Math.floor(context.duration / 3))} questions)
+    `;
     
-    if (context.region) userMessage += `\nRegion: ${context.region}`;
-    if (context.companyName) userMessage += `\nTarget Company: ${context.companyName}`;
-    if (context.industry) userMessage += `\nIndustry: ${context.industry}`;
-    
+    // Add Region context if available
+    if (context.region) {
+        userMessage += `\n- Region: ${context.region} (Ensure cultural/professional norms match this region).`;
+    }
+
+    // Add Resume (Truncated to avoid token limits, but large enough for context)
     if (context.resumeText) {
-        userMessage += `\n\nCANDIDATE RESUME:\n${context.resumeText.slice(0, 3000)}`;
+        userMessage += `\n\n**CANDIDATE RESUME (Excerpt):**\n"${context.resumeText.slice(0, 4000)}"`;
+    } else {
+        userMessage += `\n\n**CANDIDATE RESUME:** Not provided.`;
     }
 
+    // Add Job Description
     if (context.jobDescription) {
-        userMessage += `\n\nJOB DESCRIPTION:\n${context.jobDescription.slice(0, 1000)}`;
+        userMessage += `\n\n**JOB DESCRIPTION (Excerpt):**\n"${context.jobDescription.slice(0, 1500)}"`;
     }
 
-    // ✅ Added "Please return JSON." to the user message as a safety net
-    userMessage += "\nPlease return the results in JSON format.";
-
-    const completion = await openai.chat.completions.create({
-        model: "gpt-4o", 
-        messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userMessage }
-        ],
-        response_format: { type: "json_object" }, 
-    });
-
-    const content = completion.choices[0].message.content;
-    if (!content) return [];
+    userMessage += `
+    \n**TASK:**
+    Generate a list of interview questions. 
+    1. The first question MUST be a soft opener (e.g., "Tell me about yourself").
+    2. The rest should be specific to their resume and the job description.
+    3. Make them sound like a human talking, not a list of requirements.
+    `;
 
     try {
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o", // Use GPT-4o for best nuance
+            messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: userMessage }
+            ],
+            response_format: { type: "json_object" }, 
+            temperature: 0.7, // Slightly higher creativity for natural phrasing
+        });
+
+        const content = completion.choices[0].message.content;
+        if (!content) return [];
+
         const result = JSON.parse(content);
         return result.questions || [];
+
     } catch (err) {
-        console.error("Failed to parse OpenAI JSON", err);
-        return ["Tell me about yourself."]; 
+        console.error("❌ Failed to generate questions:", err);
+        // Fallback questions if AI fails
+        return [
+            "Could you start by telling me a little about your background?",
+            "What interests you most about this position?",
+            "Can you describe a challenging project you've worked on recently?"
+        ]; 
     }
 }
