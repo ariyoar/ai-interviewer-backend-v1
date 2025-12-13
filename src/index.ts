@@ -5,37 +5,36 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
+import pdf from 'pdf-parse'; // 👈 PDF Import
 import { generatePrimaryQuestions } from './openai'; // The "Brain" for questions
 import { RealtimeSession } from './realtime';        // The "Voice" loop
 
 // Load environment variables
 dotenv.config();
 
-// 1. INITIALIZE APP FIRST (Crucial Step)
+// 1. INITIALIZE APP FIRST
 const app = express();
 const prisma = new PrismaClient();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // 2. CONFIGURE MIDDLEWARE
-// Fix: We moved this AFTER 'const app = express()' so it actually works
 app.use(cors({
-    origin: '*', // Allow connections from ANY website (Lovable, localhost, etc.)
+    origin: '*', // Allow connections from ANY website
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
 
-// Use a single JSON parser with the higher limit for Resumes
-app.use(express.json({ limit: '10mb' }));
+// Use a higher limit (50mb) to handle large PDF Base64 strings
+app.use(express.json({ limit: '50mb' }));
 
 // Store active voice sessions in memory
-// Map<SessionID, RealtimeSessionInstance>
 const activeSessions = new Map<string, RealtimeSession>();
 
-// --- REST API: Session Creation (Requirement 1.1) ---
+// --- REST API: Session Creation ---
 app.post('/api/session', async (req, res) => {
     try {
-        // 1. Destructure ALL the new fields from your Lovable form
+        // 1. Destructure ALL fields
         const { 
             role, 
             experience, 
@@ -45,10 +44,37 @@ app.post('/api/session', async (req, res) => {
             industry, 
             region,
             resumeText,
-            resumeFile
+            resumeFile // This comes in as a Base64 string
         } = req.body;
         
-        // 2. Create the session in DB with ALL new fields
+        console.log("📝 Received Session Request...");
+
+        // --- 🔍 PDF PARSING LOGIC START ---
+        // Default to the plain text provided, or empty string
+        let finalResumeText = resumeText || "";
+
+        if (resumeFile) {
+            console.log("📂 PDF File detected. Extracting text...");
+            try {
+                // 1. Convert Base64 string to a Buffer
+                const buffer = Buffer.from(resumeFile, 'base64');
+                
+                // 2. Extract text using pdf-parse
+                const pdfData = await pdf(buffer);
+                
+                // 3. Clean up the text (remove excessive newlines/spaces)
+                // This replaces multiple newlines with a single newline to make it readable for AI
+                finalResumeText = pdfData.text.replace(/\n\s*\n/g, '\n').trim(); 
+                
+                console.log(`✅ PDF Extracted! Length: ${finalResumeText.length} chars`);
+            } catch (err) {
+                console.error("❌ Failed to parse PDF:", err);
+                // If parsing fails, we fall back to whatever was in 'resumeText' or empty string
+            }
+        }
+        // --- 🔍 PDF PARSING LOGIC END ---
+
+        // 2. Create the session in DB
         const session = await prisma.interviewSession.create({
             data: {
                 role,
@@ -58,8 +84,8 @@ app.post('/api/session', async (req, res) => {
                 region,           
                 industry,         
                 jobDescription,
-                resumeText,
-                resumeFile
+                resumeText: finalResumeText, // ✅ Save the CLEAN extracted text
+                resumeFile: resumeFile ? "saved_as_base64" : null // Optional: Indicate file was sent
             }
         });
 
@@ -74,7 +100,7 @@ app.post('/api/session', async (req, res) => {
             companyName,
             industry,
             region,
-            resumeText          // ✅ Passed Resume to AI
+            resumeText: finalResumeText // ✅ Pass CLEAN text to AI
         });
 
         // 4. Save Questions to DB
@@ -98,7 +124,7 @@ app.post('/api/session', async (req, res) => {
     }
 });
 
-// --- WEBSOCKET: Real-time Audio/Text (Requirement 3) ---
+// --- WEBSOCKET: Real-time Audio/Text ---
 wss.on('connection', (ws: WebSocket) => {
     console.log('New client connected');
 
@@ -153,8 +179,8 @@ wss.on('connection', (ws: WebSocket) => {
     });
 });
 
-// Start Server
+// Start Server (Updated for Railway Production)
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`);
+server.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`✅ Server running on port ${PORT}`);
 });

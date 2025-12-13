@@ -1,9 +1,10 @@
 // src/test-client.ts
 import WebSocket from 'ws';
 
-// 1. Define the API and WS URL
-const API_URL = 'http://localhost:3000/api/session';
-const WS_URL = 'ws://localhost:3000';
+// 🔴 LIVE RAILWAY CONFIGURATION
+// (Note the use of 'https' and 'wss' for secure production connections)
+const API_URL = 'https://ai-interviewer-backend-v1-production.up.railway.app/api/session';
+const WS_URL = 'wss://ai-interviewer-backend-v1-production.up.railway.app';
 
 interface SessionData {
     id: string;
@@ -11,7 +12,7 @@ interface SessionData {
 }
 
 async function runTest() {
-    console.log("🚀 Starting System Test...");
+    console.log("🚀 Starting System Test (Target: RAILWAY)...");
 
     // 2. Create a Session via REST API (With Resume & Region!)
     console.log("1️⃣  Creating Interview Session...");
@@ -79,12 +80,14 @@ async function runTest() {
             if (msg.type === 'ai_audio_chunk') {
                 console.log("🎵 Received Audio Chunk from AI (It works!)");
                 console.log("✅ TEST PASSED: Full Loop Verified.");
+                ws.close(); // Close connection nicely
                 process.exit(0);
             }
         });
 
         ws.on('error', (err) => {
             console.error("❌ WebSocket Error:", err);
+            console.log("💡 HINT: If this fails, your Railway deployment might be crashed or your URL is wrong.");
         });
 
     } catch (err) {
