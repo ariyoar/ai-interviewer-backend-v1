@@ -28,7 +28,7 @@ You will be given the candidate's Resume text, Job Description (JD), and Company
 - If the JD asks for "Leadership," ask a scenario question about leading a team.
 
 ### OUTPUT FORMAT:
-Return ONLY a valid JSON object containing an array of strings strings.
+Return ONLY a valid JSON object containing an array of strings.
 Example:
 { 
   "questions": [
@@ -63,19 +63,16 @@ export async function generatePrimaryQuestions(
     - Interview Duration: ${context.duration} minutes (Aim for ~${Math.max(3, Math.floor(context.duration / 3))} questions)
     `;
     
-    // Add Region context if available
     if (context.region) {
         userMessage += `\n- Region: ${context.region} (Ensure cultural/professional norms match this region).`;
     }
 
-    // Add Resume (Truncated to avoid token limits, but large enough for context)
     if (context.resumeText) {
         userMessage += `\n\n**CANDIDATE RESUME (Excerpt):**\n"${context.resumeText.slice(0, 4000)}"`;
     } else {
         userMessage += `\n\n**CANDIDATE RESUME:** Not provided.`;
     }
 
-    // Add Job Description
     if (context.jobDescription) {
         userMessage += `\n\n**JOB DESCRIPTION (Excerpt):**\n"${context.jobDescription.slice(0, 1500)}"`;
     }
@@ -90,13 +87,13 @@ export async function generatePrimaryQuestions(
 
     try {
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o", // Use GPT-4o for best nuance
+            model: "gpt-4o", 
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: userMessage }
             ],
             response_format: { type: "json_object" }, 
-            temperature: 0.7, // Slightly higher creativity for natural phrasing
+            temperature: 0.7, 
         });
 
         const content = completion.choices[0].message.content;
@@ -107,7 +104,6 @@ export async function generatePrimaryQuestions(
 
     } catch (err) {
         console.error("❌ Failed to generate questions:", err);
-        // Fallback questions if AI fails
         return [
             "Could you start by telling me a little about your background?",
             "What interests you most about this position?",
