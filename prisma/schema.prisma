@@ -1,0 +1,55 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model InterviewSession {
+  id              String   @id @default(cuid())
+  role            String
+  experience      String
+  durationMinutes Int
+  companyName     String?
+  
+  // --- NEW FIELDS ---
+  region          String?
+  industry        String?
+  jobDescription  String?  @db.Text // Use @db.Text for long content
+  resumeText      String?  @db.Text
+  // ------------------
+
+  status          String   @default("ready") // "ready", "active", "completed"
+
+  startedAt       DateTime?
+  endedAt         DateTime?
+
+  questions       InterviewQuestion[]
+  transcript      TranscriptEntry[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model InterviewQuestion {
+  id        String @id @default(cuid())
+  sessionId String
+  order     Int
+  question  String
+
+  session   InterviewSession @relation(fields: [sessionId], references: [id])
+}
+
+model TranscriptEntry {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // "interviewer" | "candidate" | "system"
+  text      String
+  createdAt DateTime @default(now())
+
+  session   InterviewSession @relation(fields: [sessionId], references: [id])
+}

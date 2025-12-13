@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    /* Base Options: Use CommonJS for standard Node.js compatibility */
+    "target": "es2020",
+    "module": "commonjs",
+    "lib": ["es2020"],
+    
+    /* Directory Structure */
+    "rootDir": "./src",      /* Where your code lives */
+    "outDir": "./dist",      /* Where the compiled code goes */
+
+    /* strictness */
+    "strict": true,
+    "esModuleInterop": true, /* Allows importing standard modules easily */
+    "skipLibCheck": true,    /* Skips checking inside node_modules files (saves time) */
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
