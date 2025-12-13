@@ -37,7 +37,8 @@ app.post('/api/session', async (req, res) => {
             jobDescription, 
             industry, 
             region,
-            resumeText 
+            resumeText,
+            resumeFile
         } = req.body;
         
         // 2. Create the session in DB with ALL new fields
@@ -51,7 +52,8 @@ app.post('/api/session', async (req, res) => {
                 region,           
                 industry,         
                 jobDescription,
-                resumeText        // ✅ Saved Resume to Database
+                resumeText,
+                resumeFile
             }
         });
 

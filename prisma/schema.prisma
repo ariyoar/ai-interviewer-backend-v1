@@ -21,6 +21,7 @@ model InterviewSession {
   industry        String?
   jobDescription  String?  @db.Text // Use @db.Text for long content
   resumeText      String?  @db.Text
+  resumeFile      String?  @db.Text  // The actual PDF file (Base64 encoded)
   // ------------------
 
   status          String   @default("ready") // "ready", "active", "completed"
