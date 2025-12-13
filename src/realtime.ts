@@ -1,98 +1,141 @@
 // src/realtime.ts
 import { WebSocket } from 'ws';
-import { TranscriptEntry } from '@prisma/client';
+import OpenAI from 'openai';
+import { PrismaClient } from '@prisma/client';
 
-// This class manages the connection between Your Backend <-> OpenAI Realtime API
+const prisma = new PrismaClient();
+const openai = new OpenAI();
+
+// The stages of our interview conversation
+type SessionState = 'INTRO' | 'SMALL_TALK' | 'INTERVIEW' | 'CLOSING';
+
 export class RealtimeSession {
     private ws: WebSocket;
     private sessionId: string;
-    private openAIWs: WebSocket | null = null;
+    private state: SessionState = 'INTRO'; // <--- STARTS HERE
+    private currentQuestionIndex: number = 0;
+    private questions: string[] = [];
     
-    constructor(clientWs: WebSocket, sessionId: string) {
-        this.ws = clientWs;
+    // Context for the persona
+    private role: string = "";
+    private company: string = "";
+
+    constructor(ws: WebSocket, sessionId: string) {
+        this.ws = ws;
         this.sessionId = sessionId;
-        this.initializeOpenAIConnection();
+        this.init();
     }
 
-    private initializeOpenAIConnection() {
-        const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
+    private async init() {
+        // 1. Load Session Data
+        const session = await prisma.interviewSession.findUnique({
+            where: { id: this.sessionId },
+            include: { questions: { orderBy: { order: 'asc' } } }
+        });
+
+        if (!session) return;
+
+        this.role = session.role;
+        this.company = session.companyName || "our company";
+        this.questions = session.questions.map(q => q.question);
+
+        // 2. Start the Conversation (INTRO)
+        // This triggers the "Hi there" IMMEDIATELY when the socket connects
+        this.handleIntro();
+    }
+
+    // --- 🟢 PHASE 1: INTRO ---
+    private async handleIntro() {
+        console.log("👋 Sending Intro Greeting...");
+        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
         
-        this.openAIWs = new WebSocket(url, {
-            headers: {
-                "Authorization": "Bearer " + process.env.OPENAI_API_KEY,
-                "OpenAI-Beta": "realtime=v1",
-            },
-        });
-
-        this.openAIWs.on('open', () => {
-            console.log(`✅ Connected to OpenAI Realtime for session ${this.sessionId}`);
-            this.setupSession();
-        });
-
-        this.openAIWs.on('message', (data) => {
-            this.handleOpenAIMessage(data);
-        });
-
-        this.openAIWs.on('error', (err) => {
-            console.error("OpenAI Socket Error:", err);
-        });
-    }
-
-    private setupSession() {
-        if (!this.openAIWs) return;
+        // Send Audio & Text
+        await this.speak(greeting);
         
-        // Configure the AI's voice and behavior
-        const sessionConfig = {
-            type: "session.update",
-            session: {
-                modalities: ["text", "audio"],
-                voice: "verse", // or 'alloy', 'echo', 'shimmer'
-                instructions: `
-                    You are a friendly, professional interviewer. 
-                    - Keep answers concise. 
-                    - Acknowledge what the user said before moving on.
-                    - Do not lecture.
-                `,
-            }
-        };
-        this.openAIWs.send(JSON.stringify(sessionConfig));
+        // Update State: We are now waiting for the user to say "I'm good"
+        this.state = 'SMALL_TALK'; 
     }
 
-    // 1. Receive Audio from User (Frontend -> Backend -> OpenAI)
-    public handleUserAudio(base64Audio: string) {
-        if (!this.openAIWs || this.openAIWs.readyState !== WebSocket.OPEN) return;
-
-        // Append audio buffer to OpenAI's context
-        this.openAIWs.send(JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: base64Audio
-        }));
+    // --- 🎤 HANDLE USER SPEECH ---
+    public async handleUserAudio(audioBase64: string) {
+        // (Buffer logic would go here in production)
     }
 
-    // 2. Commit the audio (Tell OpenAI "User is done talking, now reply")
-    public commitUserAudio() {
-        if (!this.openAIWs) return;
-        this.openAIWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-        this.openAIWs.send(JSON.stringify({ type: "response.create" }));
+    // Triggered when user finishes speaking
+    public async commitUserAudio() {
+        console.log(`User finished speaking. Current State: ${this.state}`);
+
+        if (this.state === 'SMALL_TALK') {
+            // User just said "I'm good, thanks." -> We transition to interview.
+            await this.transitionToInterview();
+        } 
+        else if (this.state === 'INTERVIEW') {
+            // User just answered a technical question. -> We acknowledge and move on.
+            await this.handleInterviewResponse();
+        }
     }
 
-    // 3. Handle OpenAI's Response (OpenAI -> Backend -> Frontend)
-    private handleOpenAIMessage(data: any) {
-        const event = JSON.parse(data.toString());
+    // --- 🟡 PHASE 2: TRANSITION ---
+    private async transitionToInterview() {
+        console.log("🚀 Transitioning to Interview Mode");
+        const transition = "That's great to hear. We have a lot to cover, so let's dive right in. I'd love to start by learning a bit more about your background.";
+        await this.speak(transition);
+        
+        this.state = 'INTERVIEW';
+        // Now we explicitly ask Question 1
+        this.askCurrentQuestion();
+    }
 
-        // When OpenAI sends audio back
-        if (event.type === 'response.audio.delta') {
-            // Forward audio chunk to Frontend immediately
+    // --- 🔴 PHASE 3: INTERVIEW LOOP ---
+    private async handleInterviewResponse() {
+        // 1. Acknowledge the previous answer (The "Bridge")
+        const acknowledgments = [
+            "Thanks for sharing that detail.",
+            "That makes sense.",
+            "I appreciate that example.",
+            "Got it, that's a clear explanation.",
+            "That's a solid approach."
+        ];
+        const bridge = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
+
+        // 2. Move to next question
+        this.currentQuestionIndex++;
+        
+        if (this.currentQuestionIndex < this.questions.length) {
+            const nextQ = this.questions[this.currentQuestionIndex];
+            await this.speak(`${bridge} ${nextQ}`);
+        } else {
+            this.state = 'CLOSING';
+            await this.speak("That actually covers everything I wanted to ask. Do you have any questions for me before we wrap up?");
+        }
+    }
+
+    private async askCurrentQuestion() {
+        if (this.currentQuestionIndex < this.questions.length) {
+            const question = this.questions[this.currentQuestionIndex];
+            await this.speak(question);
+        }
+    }
+
+    // --- 🔊 HELPER: SPEAK ---
+    private async speak(text: string) {
+        // Send Text (Frontend might display this in a caption bubble)
+        this.ws.send(JSON.stringify({ type: 'ai_text', text }));
+
+        try {
+            const mp3 = await openai.audio.speech.create({
+                model: "tts-1",
+                voice: "alloy",
+                input: text,
+            });
+            const buffer = Buffer.from(await mp3.arrayBuffer());
+            
             this.ws.send(JSON.stringify({
                 type: 'ai_audio_chunk',
-                audio: event.delta
+                audio: buffer.toString('base64')
             }));
-        }
-
-        // When OpenAI sends the text transcript (for our DB)
-        if (event.type === 'response.audio_transcript.done') {
-            console.log("🤖 AI said:", event.transcript);
-            // TODO: Save to Database (TranscriptEntry)
+        } catch (err) {
+            console.error("TTS Error:", err);
         }
     }
 }
