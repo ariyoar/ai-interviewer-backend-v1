@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
+ "scripts": {
     "dev": "nodemon src/index.ts",
-    "build": "echo 'No build step necessary for ts-node'",
-    "start": "npx ts-node src/index.ts"
+    "build": "echo 'Skipping build for direct TS execution'",
+    "start": "npx ts-node src/index.ts",
+    "test-client": "ts-node src/test-client.ts"
   },
   "keywords": [],
   "author": "",
