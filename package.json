@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/index.ts",
-    "test-client": "ts-node src/test-client.ts"
+    "build": "echo 'No build step necessary for ts-node'",
+    "start": "npx ts-node src/index.ts"
   },
   "keywords": [],
   "author": "",
