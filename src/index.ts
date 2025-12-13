@@ -11,15 +11,22 @@ import { RealtimeSession } from './realtime';        // The "Voice" loop
 // Load environment variables
 dotenv.config();
 
-// Initialize DB and Apps
+// 1. INITIALIZE APP FIRST (Crucial Step)
 const app = express();
 const prisma = new PrismaClient();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increased limit to handle large resume text
+// 2. CONFIGURE MIDDLEWARE
+// Fix: We moved this AFTER 'const app = express()' so it actually works
+app.use(cors({
+    origin: '*', // Allow connections from ANY website (Lovable, localhost, etc.)
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type']
+}));
+
+// Use a single JSON parser with the higher limit for Resumes
+app.use(express.json({ limit: '10mb' }));
 
 // Store active voice sessions in memory
 // Map<SessionID, RealtimeSessionInstance>
@@ -42,7 +49,6 @@ app.post('/api/session', async (req, res) => {
         } = req.body;
         
         // 2. Create the session in DB with ALL new fields
-        // Now that schema.prisma is updated, we can save these directly
         const session = await prisma.interviewSession.create({
             data: {
                 role,
@@ -60,7 +66,6 @@ app.post('/api/session', async (req, res) => {
         console.log(`Session created: ${session.id}`);
 
         // 3. Generate Questions using OpenAI (The "Brain")
-        // We pass the full context (including resume) so the AI can tailor the questions
         const questions = await generatePrimaryQuestions({
             role,
             experience,
