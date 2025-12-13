@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-import pdf from 'pdf-parse'; // 👈 PDF Import
+const pdf = require('pdf-parse');
 import { generatePrimaryQuestions } from './openai'; // The "Brain" for questions
 import { RealtimeSession } from './realtime';        // The "Voice" loop
 
@@ -184,3 +184,4 @@ const PORT = process.env.PORT || 8080;
 server.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`✅ Server running on port ${PORT}`);
 });
+//
