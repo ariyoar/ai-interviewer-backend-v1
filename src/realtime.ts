@@ -1,6 +1,7 @@
 // src/realtime.ts
 import { WebSocket } from 'ws';
 import OpenAI from 'openai';
+import { ElevenLabsClient } from 'elevenlabs'; // <--- NEW IMPORT
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,12 @@ import os from 'os';
 const prisma = new PrismaClient();
 const openai = new OpenAI();
 
-// Added 'Q_AND_A' to the flow
+// Initialize ElevenLabs (Make sure ELEVENLABS_API_KEY is in your .env)
+const elevenlabs = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY 
+});
+
+// The stages of our interview conversation
 type SessionState = 'INTRO' | 'SMALL_TALK' | 'INTERVIEW' | 'Q_AND_A' | 'CLOSING';
 
 export class RealtimeSession {
@@ -19,7 +25,7 @@ export class RealtimeSession {
     private currentQuestionIndex: number = 0;
     private questions: string[] = [];
     
-    // Audio Buffering (To "Hear" the user)
+    // Audio Buffering
     private audioBuffer: Buffer[] = [];
     
     // Context
@@ -46,7 +52,6 @@ export class RealtimeSession {
         this.jobDescription = session.jobDescription || "";
         this.questions = session.questions.map(q => q.question);
 
-        // Start the conversation immediately
         this.handleIntro();
     }
 
@@ -79,10 +84,8 @@ export class RealtimeSession {
         const { text: rawText, isSilence } = await this.transcribeAudio();
 
         // 3. Scalable Silence Guard
-        // If Whisper says it's silence (high no_speech_prob) OR text is empty
         if (isSilence || rawText.trim().length < 2) {
             console.log("⚠️ Whisper detected silence/noise. Resetting Frontend.");
-            // 🚨 CRITICAL: Tell frontend to stop "Thinking..."
             this.ws.send(JSON.stringify({ type: 'ai_silence' })); 
             this.audioBuffer = []; 
             return; 
@@ -134,7 +137,6 @@ export class RealtimeSession {
             const nextQ = this.questions[this.currentQuestionIndex];
             await this.speak(`${bridge} ${nextQ}`);
         } else {
-            // All questions done -> Move to Q&A
             this.state = 'Q_AND_A';
             await this.speak("That actually covers everything I wanted to ask. Before we finish, do you have any questions for me about the role or the company?");
         }
@@ -148,11 +150,10 @@ export class RealtimeSession {
             this.state = 'CLOSING';
             await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
             
-            // 🚨 TRIGGER FRONTEND TO END INTERVIEW
             console.log("🏁 Interview Complete. Sending termination signal.");
             setTimeout(() => {
                 this.ws.send(JSON.stringify({ type: 'interview.complete' }));
-            }, 4000); 
+            }, 5000); // Increased to 5s to allow goodbye message to finish
         } else {
             const prompt = `
             You are the Hiring Manager for the ${this.role} role at ${this.company}.
@@ -203,29 +204,26 @@ export class RealtimeSession {
         } catch (e) { return false; }
     }
 
-    // --- 👂 HELPER: TRANSCRIBE (With Confidence Check) ---
+    // --- 👂 HELPER: TRANSCRIBE ---
     private async transcribeAudio(): Promise<{ text: string; isSilence: boolean }> {
         if (this.audioBuffer.length === 0) return { text: "", isSilence: true };
 
-        const tempFilePath = path.join(os.tmpdir(), `upload_${this.sessionId}_${Date.now()}.wav`);
+        const tempFilePath = path.join(os.tmpdir(), `upload_${this.sessionId}_${Date.now()}.webm`);
         fs.writeFileSync(tempFilePath, Buffer.concat(this.audioBuffer));
 
         try {
-            // 1. Request 'verbose_json' to get probability scores
             const response = await openai.audio.transcriptions.create({
                 file: fs.createReadStream(tempFilePath),
                 model: "whisper-1",
-                response_format: "verbose_json", // <--- CRITICAL CHANGE
+                response_format: "verbose_json", 
             }) as any; 
 
-            // 2. Check the "No Speech Probability"
             const noSpeechProb = response.segments?.[0]?.no_speech_prob || 0;
             const text = response.text || "";
 
             console.log(`🔍 Analysis: Text="${text}", NoSpeechProb=${noSpeechProb.toFixed(2)}`);
 
-            // If > 50% sure it's silence, reject it.
-            if (noSpeechProb > 0.5) { 
+            if (noSpeechProb > 0.6) { 
                 return { text: "", isSilence: true };
             }
 
@@ -239,23 +237,37 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🔊 HELPER: SPEAK ---
+    // --- 🔊 HELPER: SPEAK (ELEVENLABS UPGRADE) ---
     private async speak(text: string) {
         console.log(`📤 Speaking: "${text}"`);
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
         try {
-            const mp3 = await openai.audio.speech.create({
-                model: "tts-1",
-                voice: "alloy",
-                input: text,
+            // 🚨 REALISM SETTINGS:
+            // Stability 0.5 allows for breathing and natural pauses.
+            // Similarity 0.75 keeps the voice consistent but expressive.
+            const audioStream = await elevenlabs.generate({
+                voice: "j1r6AmrWb83gX3cYycRn", // Default "Rachel" - Replace if you have a custom ID
+                text: text,
+                model_id: "eleven_turbo_v2_5", // Fastest model
+                voice_settings: {
+                    stability: 0.5,       // <--- LOW STABILITY = MORE BREATHING/REALISM
+                    similarity_boost: 0.75 
+                }
             });
-            const buffer = Buffer.from(await mp3.arrayBuffer());
+
+            const chunks: Buffer[] = [];
+            for await (const chunk of audioStream) {
+                chunks.push(Buffer.from(chunk));
+            }
+            const buffer = Buffer.concat(chunks);
             
             this.ws.send(JSON.stringify({
                 type: 'ai_audio_chunk',
                 audio: buffer.toString('base64')
             }));
-        } catch (err) { console.error("TTS Error:", err); }
+        } catch (err) {
+            console.error("ElevenLabs Error:", err);
+        }
     }
 }
