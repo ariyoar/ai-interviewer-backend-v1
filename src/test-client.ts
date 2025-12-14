@@ -2,7 +2,6 @@
 import WebSocket from 'ws';
 
 // 🔴 LIVE RAILWAY CONFIGURATION
-// (Note the use of 'https' and 'wss' for secure production connections)
 const API_URL = 'https://ai-interviewer-backend-v1-production.up.railway.app/api/session';
 const WS_URL = 'wss://ai-interviewer-backend-v1-production.up.railway.app';
 
@@ -12,12 +11,13 @@ interface SessionData {
 }
 
 async function runTest() {
-    console.log("🚀 Starting System Test (Target: RAILWAY)...");
+    console.log("🚀 Starting Smart Banter Test (Target: RAILWAY)...");
 
-    // 2. Create a Session via REST API (With Resume & Region!)
+    // 1. Create Session via REST API
     console.log("1️⃣  Creating Interview Session...");
     
-    const mockResume = "I am a Senior React Developer with 5 years of experience at TechCorp. I optimized rendering by 40%.";
+    // We send a mock resume to test the parser too
+    const mockResume = "I am a Senior React Developer with 5 years of experience leading teams.";
     
     try {
         const createRes = await fetch(API_URL, {
@@ -29,7 +29,7 @@ async function runTest() {
                 durationMinutes: 15,
                 region: "US",
                 industry: "Tech",
-                resumeText: mockResume // Testing the new field!
+                resumeText: mockResume
             })
         });
         
@@ -40,54 +40,65 @@ async function runTest() {
 
         const sessionData = await createRes.json() as SessionData;
         console.log(`✅ Session Created! ID: ${sessionData.id}`);
-        console.log(`🧠 Generated ${sessionData.questions.length} questions.`);
-        console.log(`   Sample Q: "${sessionData.questions[0]}"`);
 
-        // 3. Connect to WebSocket
+        // 2. Connect to WebSocket
         console.log("2️⃣  Connecting to Real-time Voice Socket...");
         const ws = new WebSocket(WS_URL);
+        let conversationStep = 0; // 0 = Waiting for Intro, 1 = Waiting for Transition
 
         ws.on('open', () => {
             console.log("✅ WebSocket Connected!");
 
-            // Initialize the session
+            // Initialize the session (Triggers AI Intro)
+            console.log("📤 Sending 'init_session'...");
             ws.send(JSON.stringify({
                 type: 'init_session',
                 sessionId: sessionData.id
             }));
-
-            // Simulate "Speaking" (Sending a tiny dummy audio chunk)
-            setTimeout(() => {
-                console.log("3️⃣  Simulating User Speaking...");
-                ws.send(JSON.stringify({
-                    type: 'audio_chunk',
-                    audio: "UklGRi4AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=" // Empty WAV header
-                }));
-            }, 1000);
-
-            // Simulate "Stop Speaking" (User releases spacebar)
-            setTimeout(() => {
-                console.log("4️⃣  User Finished Speaking (Sending Commit)...");
-                ws.send(JSON.stringify({
-                    type: 'user_speaking_end'
-                }));
-            }, 2000);
         });
 
         ws.on('message', (data) => {
             const msg = JSON.parse(data.toString());
             
-            if (msg.type === 'ai_audio_chunk') {
-                console.log("🎵 Received Audio Chunk from AI (It works!)");
-                console.log("✅ TEST PASSED: Full Loop Verified.");
-                ws.close(); // Close connection nicely
-                process.exit(0);
+            // We only care about text for this test logic (it's easier to read)
+            if (msg.type === 'ai_text') {
+                console.log(`\n🗣️  AI SAYS: "${msg.text}"`);
+
+                // STEP 1: AI says "Hi there!" (The Intro)
+                if (conversationStep === 0) {
+                    conversationStep++;
+                    console.log("✅ Received Intro! Now simulating user reply...");
+
+                    // Wait 1 second, then reply
+                    setTimeout(() => {
+                        console.log("🎤 [User]: 'I am doing great, thanks for asking!'");
+                        
+                        // 1. Send dummy audio chunk (needed to trigger 'hearing')
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio: "UklGRi4AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=" 
+                        }));
+
+                        // 2. Send Commit signal
+                        ws.send(JSON.stringify({
+                            type: 'user_speaking_end'
+                        }));
+                    }, 1000);
+                }
+                
+                // STEP 2: AI says "Great, let's start..." (The Transition)
+                else if (conversationStep === 1) {
+                    console.log("✅ Received Transition! The AI heard us and moved to the interview.");
+                    console.log("🎉 TEST PASSED: Full Banter Loop Verified.");
+                    ws.close();
+                    process.exit(0);
+                }
             }
         });
 
         ws.on('error', (err) => {
             console.error("❌ WebSocket Error:", err);
-            console.log("💡 HINT: If this fails, your Railway deployment might be crashed or your URL is wrong.");
+            console.log("💡 HINT: Check if your Railway URL is correct.");
         });
 
     } catch (err) {
