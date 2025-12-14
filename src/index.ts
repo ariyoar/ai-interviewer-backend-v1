@@ -164,21 +164,23 @@ wss.on('connection', (ws: WebSocket) => {
                 }
             }
 
-            // 2. Handle Audio Stream (Chunk by chunk from Frontend)
-            if (data.type === 'audio_chunk' && currentSessionId) {
-                const session = activeSessions.get(currentSessionId);
-                if (session) {
+            // Get the active session object
+            const session = currentSessionId ? activeSessions.get(currentSessionId) : null;
+
+            if (session) {
+                // 2. Handle Audio Stream (Standard & Lovable formats)
+                // We check for both 'audio_chunk' (old) AND 'input_audio_buffer.append' (new)
+                if (data.type === 'audio_chunk' || data.type === 'input_audio_buffer.append') {
+                    // The audio data is in the 'audio' field for both formats
                     session.handleUserAudio(data.audio);
                 }
-            }
 
-            // 3. User Stopped Speaking (Spacebar Release)
-            if (data.type === 'user_speaking_end' && currentSessionId) {
-                console.log('User finished speaking. Committing audio...');
-                const session = activeSessions.get(currentSessionId);
-                if (session) {
+                // 3. User Stopped Speaking (Spacebar Release)
+                // We check for both 'user_speaking_end' (old) AND 'input_audio_buffer.commit' (new)
+                if (data.type === 'user_speaking_end' || data.type === 'input_audio_buffer.commit') {
+                    console.log('User finished speaking. Committing audio...');
                     // Tell OpenAI to stop listening and start thinking
-                    session.commitUserAudio();
+                    await session.commitUserAudio();
                 }
             }
 
