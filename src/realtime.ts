@@ -170,6 +170,9 @@ export class RealtimeSession {
 
     // --- 🔊 HELPER: SPEAK ---
     private async speak(text: string) {
+        // FORCE UPDATE: Add this log to verify the text is queuing
+        console.log(`📤 Sending text to frontend: "${text}"`);
+
         // Send Text (Frontend displays this in live captions)
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
