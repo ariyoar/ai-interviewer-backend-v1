@@ -201,10 +201,19 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC (NEUTRAL UPDATE) ---
+    // --- 🧠 SMART BANTER LOGIC (FIXED) ---
     private async handleSmallTalkResponse(userText: string) {
-        // Updated for professional neutrality
-        const prompt = `You are a professional Hiring Manager. User said: "${userText}". Reply politely but briefly, then transition to the first interview question.`;
+        // 🚨 FIX: Strict instruction to NOT ask a question.
+        const prompt = `
+        You are a professional Hiring Manager. 
+        User said: "${userText}" (in response to "How are you?").
+        
+        Task: 
+        1. Acknowledge their response politely (e.g., "Glad to hear that").
+        2. State that you are ready to begin (e.g., "Let's get started").
+        
+        🛑 STRICT RULE: DO NOT ask the candidate any questions yet. The first interview question will be asked immediately after you stop speaking.
+        `;
         const response = await this.askGPT(prompt, 60);
         await this.speak(response);
         this.state = 'INTERVIEW';
