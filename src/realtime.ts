@@ -95,6 +95,10 @@ export class RealtimeSession {
         }
 
         console.log(`🗣️ Valid User Speech: "${rawText}"`);
+        
+        // 💾 SAVE USER ENTRY TO DB
+        await this.saveTranscript('user', rawText);
+
         this.audioBuffer = []; 
 
         if (this.state === 'SMALL_TALK') {
@@ -105,6 +109,23 @@ export class RealtimeSession {
         }
         else if (this.state === 'Q_AND_A') {
             await this.handleQandAResponse(rawText);
+        }
+    }
+
+    // --- 💾 DATABASE SAVER (NEW) ---
+    private async saveTranscript(sender: 'user' | 'assistant', text: string) {
+        try {
+            await prisma.transcriptEntry.create({
+                data: {
+                    sessionId: this.sessionId,
+                    role: sender,
+                    text: text,        // Matches your DB column 'text'
+                    createdAt: new Date() // Matches your DB column 'createdAt'
+                }
+            });
+            console.log(`💾 Saved ${sender} transcript to DB.`);
+        } catch (err) {
+            console.error("❌ Failed to save transcript:", err);
         }
     }
 
@@ -242,6 +263,10 @@ export class RealtimeSession {
     // --- 🔊 HELPER: SPEAK (With Safety Fallback) ---
     private async speak(text: string) {
         console.log(`📤 Speaking: "${text}"`);
+
+        // 💾 SAVE ASSISTANT ENTRY TO DB
+        await this.saveTranscript('assistant', text);
+
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
         // FALLBACK: Use OpenAI if ElevenLabs is not ready
