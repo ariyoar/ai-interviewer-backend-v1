@@ -201,16 +201,17 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC ---
+    // --- 🧠 SMART BANTER LOGIC (NEUTRAL UPDATE) ---
     private async handleSmallTalkResponse(userText: string) {
-        const prompt = `You are a friendly Hiring Manager. User said: "${userText}". Reply naturally, transition to interview. Keep it brief.`;
+        // Updated for professional neutrality
+        const prompt = `You are a professional Hiring Manager. User said: "${userText}". Reply politely but briefly, then transition to the first interview question.`;
         const response = await this.askGPT(prompt, 60);
         await this.speak(response);
         this.state = 'INTERVIEW';
         this.askCurrentQuestion();
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (WITH PROBING) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW (WITH NEUTRAL PROBING) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
@@ -227,14 +228,16 @@ export class RealtimeSession {
         // 🧠 DECISION TIME: Evaluate the answer
         console.log("🤔 Evaluating answer for follow-up potential...");
         
+        // Updated for professional neutrality
         const systemPrompt = `
-        You are an experienced interviewer. 
+        You are an experienced, professional Interviewer. 
         Current Question: "${currentQ}"
         Candidate Answer: "${userText}"
         
         Task: Decide if the answer is sufficient.
-        - If it is VAGUE, too short, or misses the point: Generate a polite, brief probing question (e.g., "Can you give me a specific example?").
-        - If it is GOOD: Generate a "Bridge" sentence acknowledging the answer contextually (e.g., "That sounds like a tough challenge.").
+        - If it is VAGUE, too short, or misses the point: Generate a polite, brief probing question (e.g., "Could you clarify X?").
+        - If it is SUFFICIENT: Generate a NEUTRAL "Bridge" sentence acknowledging the answer (e.g., "Thanks for that context", "Understood", "Noted").
+        - 🛑 DO NOT use validating words like "Great", "Impressive", "Solid".
         
         Output JSON ONLY:
         {
@@ -271,7 +274,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🌉 SMART NAVIGATION HELPER ---
+    // --- 🌉 SMART NEUTRAL NAVIGATION HELPER ---
     private async moveToNextQuestion(prevUserText: string | null, bridge: string = "") {
         this.currentQuestionIndex++;
 
@@ -284,15 +287,16 @@ export class RealtimeSession {
             let finalBridge = bridge;
             
             if (!finalBridge && prevUserText) {
-                // 🧠 DYNAMIC BRIDGE GENERATION
+                // 🧠 DYNAMIC NEUTRAL BRIDGE GENERATION
                 const prompt = `
-                You are a Hiring Manager. The candidate just answered your follow-up question.
-                Candidate Answer: "${prevUserText}"
+                You are a professional Interviewer.
+                1. Candidate just said: "${prevUserText}"
+                2. Next Question: "${nextQ}"
                 
-                Task: Generate a very short (3-6 words) transition phrase to the next topic.
-                - If the answer was vague/bad: Use NEUTRAL phrasing (e.g., "Okay," "Understood," "Right, let's move on").
-                - If the answer was clear/good: Use POSITIVE phrasing (e.g., "Thanks for clarifying," "That helps").
-                - DO NOT say "That makes sense" unless it actually does.
+                Task: Generate a transition phrase (1 short sentence).
+                - 🛑 STRICT RULE: DO NOT validate the answer (No "Great", "Impressive", "Solid").
+                - Be neutral and objective.
+                - Examples: "Thanks for that context. Moving on...", "Understood. Regarding...", "Noted. Let's discuss..."
                 `;
                 finalBridge = await this.askGPT(prompt, 30);
             }
@@ -314,7 +318,7 @@ export class RealtimeSession {
             await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
             setTimeout(() => { this.ws.send(JSON.stringify({ type: 'interview.complete' })); }, 5000); 
         } else {
-            const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly. Ask "Any other questions?"`;
+            const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly and professionally. Ask "Any other questions?"`;
             const answer = await this.askGPT(prompt, 150);
             await this.speak(answer);
         }
