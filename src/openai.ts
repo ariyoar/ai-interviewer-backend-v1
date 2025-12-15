@@ -8,23 +8,27 @@ export const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY, 
 });
 
-// src/openai.ts
-
 const SYSTEM_PROMPT = `
-You are an experienced, professional Hiring Manager at a top tech company. 
-Your goal is to screen a candidate efficiently and objectively.
+You are an experienced Hiring Manager. 
+Your goal is to screen a candidate efficiently through a **natural, spoken conversation.**
 
 ### 1. TONE & STYLE:
-- **Professional & Neutral:** Do not be overly enthusiastic. Do not use exclamation marks.
-- **Direct but Polite:** Ask clear, open-ended questions.
-- **Avoid Validation:** Do not write questions that imply the candidate is already doing well.
-- **Natural Phrasing:** Use "I'd like to understand..." or "Could you walk me through..." instead of stiff "Describe a time" commands.
+- **Conversational Professional:** You are a human, not a robot. Be polite but relaxed.
+- **Objective:** Do not validate (avoid "Great answer!"). Just acknowledge and move on.
+- **Spoken, Not Written:** Write exactly how a human *speaks*, not how they write emails.
 
-### 2. DYNAMIC INPUTS:
+### 2. SPOKEN LANGUAGE RULES (CRITICAL):
+- **Use Contractions:** ALWAYS use "I'd," "You're," "Can't," "What's" instead of "I would," "You are," etc.
+- **Softeners:** Start questions naturally.
+  - *Bad:* "Describe your experience with SQL."
+  - *Good:* "So, I see you've used SQL. How comfortable are you with complex queries?"
+- **Simple Vocabulary:** Avoid stiff corporate jargon like "utilize," "leverage," or "synergize." Use "use," "use," and "work together."
+
+### 3. DYNAMIC INPUTS:
 - Use the Resume/JD to make questions specific.
-- Example: "Your resume mentions Project X. What was your specific contribution to that?"
+- If the resume mentions "Project X", ask: "I was looking at Project X on your resume—what was your specific role there?"
 
-### 3. OUTPUT FORMAT:
+### 4. OUTPUT FORMAT:
 Return ONLY a valid JSON object containing an array of strings.
 { "questions": ["Question 1", "Question 2"...] }
 `;
@@ -54,7 +58,7 @@ export async function generatePrimaryQuestions(
     `;
     
     if (context.region) {
-        userMessage += `\n- Region: ${context.region} (Ensure cultural/professional norms match this region).`;
+        userMessage += `\n- Region: ${context.region} (Ensure cultural norms match this region).`;
     }
 
     if (context.resumeText) {
@@ -70,9 +74,9 @@ export async function generatePrimaryQuestions(
     userMessage += `
     \n**TASK:**
     Generate a list of interview questions. 
-    1. The first question MUST be a soft opener (e.g., "Tell me about yourself").
+    1. The first question MUST be a soft opener (e.g., "Tell me a bit about yourself").
     2. The rest should be specific to their resume and the job description.
-    3. Make them sound like a human talking, not a list of requirements.
+    3. **IMPORTANT:** Phrase them as if you are speaking to them face-to-face. Keep it conversational.
     `;
 
     try {
@@ -83,7 +87,7 @@ export async function generatePrimaryQuestions(
                 { role: "user", content: userMessage }
             ],
             response_format: { type: "json_object" }, 
-            temperature: 0.7, 
+            temperature: 0.8, // Slightly higher temp for more natural/varied phrasing
         });
 
         const content = completion.choices[0].message.content;
@@ -96,8 +100,8 @@ export async function generatePrimaryQuestions(
         console.error("❌ Failed to generate questions:", err);
         return [
             "Could you start by telling me a little about your background?",
-            "What interests you most about this position?",
-            "Can you describe a challenging project you've worked on recently?"
+            "What excites you most about this position?",
+            "Can you walk me through a challenging project you've worked on recently?"
         ]; 
     }
 }
