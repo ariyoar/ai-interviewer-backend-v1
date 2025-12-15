@@ -34,6 +34,9 @@ export class RealtimeSession {
     private company: string = "";
     private jobDescription: string = ""; 
 
+    // 🧠 NEW: Track if we are currently inside a follow-up loop
+    private isInsideFollowUp: boolean = false;
+
     constructor(ws: WebSocket, sessionId: string) {
         this.ws = ws;
         this.sessionId = sessionId;
@@ -112,7 +115,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 💾 DATABASE SAVER (NEW) ---
+    // --- 💾 DATABASE SAVER ---
     private async saveTranscript(sender: 'user' | 'assistant', text: string) {
         try {
             await prisma.transcriptEntry.create({
@@ -207,15 +210,100 @@ export class RealtimeSession {
         this.askCurrentQuestion();
     }
 
+    // --- 🔴 SMART LOGIC: INTERVIEW (WITH PROBING) ---
     private async handleInterviewResponse(userText: string) {
-        const acknowledgments = ["Thanks for sharing.", "That makes sense.", "I appreciate that context."];
-        const bridge = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
+        const currentQ = this.questions[this.currentQuestionIndex];
+
+        // 🛑 SAFETY VALVE: If we just asked a follow-up, we MUST move on.
+        if (this.isInsideFollowUp) {
+            console.log("🔄 User answered follow-up. Moving to next question.");
+            this.isInsideFollowUp = false; // Reset flag
+            
+            // Pass the userText so we can generate a SMART bridge based on their answer
+            await this.moveToNextQuestion(userText); 
+            return;
+        }
+
+        // 🧠 DECISION TIME: Evaluate the answer
+        console.log("🤔 Evaluating answer for follow-up potential...");
+        
+        const systemPrompt = `
+        You are an experienced interviewer. 
+        Current Question: "${currentQ}"
+        Candidate Answer: "${userText}"
+        
+        Task: Decide if the answer is sufficient.
+        - If it is VAGUE, too short, or misses the point: Generate a polite, brief probing question (e.g., "Can you give me a specific example?").
+        - If it is GOOD: Generate a "Bridge" sentence acknowledging the answer contextually (e.g., "That sounds like a tough challenge.").
+        
+        Output JSON ONLY:
+        {
+            "decision": "FOLLOW_UP" or "MOVE_ON",
+            "content": "The text to speak"
+        }
+        `;
+
+        try {
+            const evaluation = await openai.chat.completions.create({
+                model: "gpt-4o-mini", // Fast & Cheap
+                messages: [{ role: "system", content: systemPrompt }],
+                response_format: { type: "json_object" },
+                temperature: 0.3
+            });
+
+            const result = JSON.parse(evaluation.choices[0].message.content || "{}");
+            const decision = result.decision || "MOVE_ON";
+            const content = result.content || "Thanks for sharing.";
+
+            if (decision === "FOLLOW_UP") {
+                console.log("🔍 Triggering Follow-Up Question");
+                this.isInsideFollowUp = true; // Set flag so we don't loop forever
+                await this.speak(content);
+            } else {
+                console.log("✅ Answer acceptable. Moving on.");
+                // Combine the "Bridge" (content) with the Next Question
+                await this.moveToNextQuestion(null, content);
+            }
+
+        } catch (err) {
+            console.error("Evaluation Error:", err);
+            await this.moveToNextQuestion("Thanks."); // Fallback
+        }
+    }
+
+    // --- 🌉 SMART NAVIGATION HELPER ---
+    private async moveToNextQuestion(prevUserText: string | null, bridge: string = "") {
         this.currentQuestionIndex++;
+
+        // If we still have questions left
         if (this.currentQuestionIndex < this.questions.length) {
-            await this.speak(`${bridge} ${this.questions[this.currentQuestionIndex]}`);
-        } else {
+            const nextQ = this.questions[this.currentQuestionIndex];
+            
+            // Logic: If we don't have a pre-generated bridge, we must generate one based on the User's last answer.
+            // This happens when coming from a follow-up (Safety Valve path).
+            let finalBridge = bridge;
+            
+            if (!finalBridge && prevUserText) {
+                // 🧠 DYNAMIC BRIDGE GENERATION
+                const prompt = `
+                You are a Hiring Manager. The candidate just answered your follow-up question.
+                Candidate Answer: "${prevUserText}"
+                
+                Task: Generate a very short (3-6 words) transition phrase to the next topic.
+                - If the answer was vague/bad: Use NEUTRAL phrasing (e.g., "Okay," "Understood," "Right, let's move on").
+                - If the answer was clear/good: Use POSITIVE phrasing (e.g., "Thanks for clarifying," "That helps").
+                - DO NOT say "That makes sense" unless it actually does.
+                `;
+                finalBridge = await this.askGPT(prompt, 30);
+            }
+
+            // Speak: Bridge + Next Question
+            await this.speak(`${finalBridge} ${nextQ}`);
+        } 
+        else {
+            // No questions left -> Q&A
             this.state = 'Q_AND_A';
-            await this.speak("That covers my questions. Do you have any questions for me?");
+            await this.speak("That covers the main questions I had. Before we wrap up, do you have any questions for me about the role or company?");
         }
     }
 
@@ -223,7 +311,7 @@ export class RealtimeSession {
         const isDone = await this.checkIfDone(userText);
         if (isDone) {
             this.state = 'CLOSING';
-            await this.speak("Great meeting you! We will be in touch. Have a great day!");
+            await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
             setTimeout(() => { this.ws.send(JSON.stringify({ type: 'interview.complete' })); }, 5000); 
         } else {
             const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly. Ask "Any other questions?"`;
