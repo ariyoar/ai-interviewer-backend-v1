@@ -34,8 +34,12 @@ export class RealtimeSession {
     private company: string = "";
     private jobDescription: string = ""; 
 
-    // 🧠 NEW: Track if we are currently inside a follow-up loop
+    // 🧠 Track if we are currently inside a follow-up loop
     private isInsideFollowUp: boolean = false;
+
+    // 🕒 NEW: Silence Tracking
+    private silenceTimer: NodeJS.Timeout | null = null;
+    private hasWarnedSilence: boolean = false;
 
     constructor(ws: WebSocket, sessionId: string) {
         this.ws = ws;
@@ -68,6 +72,10 @@ export class RealtimeSession {
 
     // --- 🎤 HANDLE USER SPEECH ---
     public handleUserAudio(base64Audio: string) {
+        // 🟢 NEW: User is alive! Kill the silence timer immediately.
+        this.stopSilenceTimer(); 
+        this.hasWarnedSilence = false; 
+
         try {
             // 🚨 FIX: Strip the "data:audio/..." header if it exists
             const cleanBase64 = base64Audio.split(',').pop() || "";
@@ -201,50 +209,49 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC (FIXED) ---
+    // --- 🧠 SMART BANTER LOGIC (UPDATED WITH PAUSE) ---
     private async handleSmallTalkResponse(userText: string) {
-        // 🚨 FIX: Strict instruction to NOT ask a question.
         const prompt = `
-        You are a professional Hiring Manager. 
+        You are a warm, professional Hiring Manager. 
         User said: "${userText}" (in response to "How are you?").
         
         Task: 
-        1. Acknowledge their response politely (e.g., "Glad to hear that").
-        2. State that you are ready to begin (e.g., "Let's get started").
+        1. Warmly acknowledge their response (e.g., "I'm really glad to hear that!" or "That's good to know.").
+        2. Softly transition to the interview (e.g., "If you're ready, let's dive in.").
         
-        🛑 STRICT RULE: DO NOT ask the candidate any questions yet. The first interview question will be asked immediately after you stop speaking.
+        🛑 STRICT RULE: DO NOT ask the first question yet. Just do the transition.
         `;
+        
         const response = await this.askGPT(prompt, 60);
         await this.speak(response);
+
+        // 2-second "Breather"
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         this.state = 'INTERVIEW';
         this.askCurrentQuestion();
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (WITH NEUTRAL PROBING) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW (UPDATED PROBING) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
-        // 🛑 SAFETY VALVE: If we just asked a follow-up, we MUST move on.
         if (this.isInsideFollowUp) {
             console.log("🔄 User answered follow-up. Moving to next question.");
             this.isInsideFollowUp = false; // Reset flag
-            
-            // Pass the userText so we can generate a SMART bridge based on their answer
             await this.moveToNextQuestion(userText); 
             return;
         }
 
-        // 🧠 DECISION TIME: Evaluate the answer
         console.log("🤔 Evaluating answer for follow-up potential...");
         
-        // Updated for professional neutrality
         const systemPrompt = `
         You are an experienced, professional Interviewer. 
         Current Question: "${currentQ}"
         Candidate Answer: "${userText}"
         
         Task: Decide if the answer is sufficient.
-        - If it is VAGUE, too short, or misses the point: Generate a polite, brief probing question (e.g., "Could you clarify X?").
+        - If it is VAGUE/SHORT: Generate a polite probe. **MUST start with an acknowledgment** (e.g., "I see. Could you clarify...", "Understood, but can you explain...").
         - If it is SUFFICIENT: Generate a NEUTRAL "Bridge" sentence acknowledging the answer (e.g., "Thanks for that context", "Understood", "Noted").
         - 🛑 DO NOT use validating words like "Great", "Impressive", "Solid".
         
@@ -283,7 +290,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🌉 SMART NEUTRAL NAVIGATION HELPER ---
+    // --- 🌉 SMART NEUTRAL NAVIGATION HELPER (UPDATED WITH PAUSE) ---
     private async moveToNextQuestion(prevUserText: string | null, bridge: string = "") {
         this.currentQuestionIndex++;
 
@@ -291,8 +298,6 @@ export class RealtimeSession {
         if (this.currentQuestionIndex < this.questions.length) {
             const nextQ = this.questions[this.currentQuestionIndex];
             
-            // Logic: If we don't have a pre-generated bridge, we must generate one based on the User's last answer.
-            // This happens when coming from a follow-up (Safety Valve path).
             let finalBridge = bridge;
             
             if (!finalBridge && prevUserText) {
@@ -310,13 +315,20 @@ export class RealtimeSession {
                 finalBridge = await this.askGPT(prompt, 30);
             }
 
-            // Speak: Bridge + Next Question
-            await this.speak(`${finalBridge} ${nextQ}`);
+            // Speak the Bridge FIRST, then PAUSE, then ask the Question.
+            if (finalBridge) {
+                await this.speak(finalBridge);
+                await new Promise(resolve => setTimeout(resolve, 800)); // 0.8s pause for impact
+            }
+
+            await this.speak(nextQ);
         } 
         else {
             // No questions left -> Q&A
             this.state = 'Q_AND_A';
-            await this.speak("That covers the main questions I had. Before we wrap up, do you have any questions for me about the role or company?");
+            await this.speak("That covers the main questions I had.");
+            await new Promise(resolve => setTimeout(resolve, 800)); // Brief pause
+            await this.speak("Before we wrap up, do you have any questions for me about the role or company?");
         }
     }
 
@@ -361,9 +373,56 @@ export class RealtimeSession {
         } catch (e) { return false; }
     }
 
+    // --- 🕒 SILENCE MANAGEMENT (NEW NATURAL HANDLING) ---
+    private startSilenceTimer() {
+        this.stopSilenceTimer(); // Clear existing
+
+        // 1. Set a timer for 15 seconds (The "Nudge")
+        this.silenceTimer = setTimeout(async () => {
+            if (!this.hasWarnedSilence) {
+                // FIRST TIMEOUT: Nudge the user naturally
+                console.log("🕒 User is silent. Sending nudge...");
+                this.hasWarnedSilence = true;
+                
+                const nudges = [
+                    "Just checking in—are you still with me?",
+                    "Do you need a moment to think about that?",
+                    "Let me know if you need me to repeat the question."
+                ];
+                const randomNudge = nudges[Math.floor(Math.random() * nudges.length)];
+                
+                await this.speak(randomNudge);
+                
+                // Restart timer for the "Kill" phase (give them 20 more seconds)
+                this.startSilenceTimer(); 
+            } else {
+                // SECOND TIMEOUT: End the call politely
+                console.log("🕒 User still silent. Ending session.");
+                
+                // 🛑 NATURAL KILL MESSAGE
+                await this.speak("It looks like I might have lost you. I'm going to end the call for now, but feel free to reconnect whenever you're ready. Thanks.");
+                
+                // Wait for audio to finish playing, then close
+                setTimeout(() => {
+                    this.ws.close(1000, "User inactivity");
+                }, 5000);
+            }
+        }, 15000); // 15 Seconds Wait Time
+    }
+
+    private stopSilenceTimer() {
+        if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+            this.silenceTimer = null;
+        }
+    }
+
     // --- 🔊 HELPER: SPEAK (With Safety Fallback) ---
     private async speak(text: string) {
         console.log(`📤 Speaking: "${text}"`);
+        
+        // 🟢 Stop timer while AI is talking (don't interrupt self)
+        this.stopSilenceTimer();
 
         // 💾 SAVE ASSISTANT ENTRY TO DB
         await this.saveTranscript('assistant', text);
@@ -378,6 +437,9 @@ export class RealtimeSession {
                 const buffer = Buffer.from(await mp3.arrayBuffer());
                 this.ws.send(JSON.stringify({ type: 'ai_audio_chunk', audio: buffer.toString('base64') }));
             } catch (e) { console.error("OpenAI TTS Error:", e); }
+            
+            // Start listening again after fallback speech
+            this.startSilenceTimer();
             return;
         }
 
@@ -385,6 +447,7 @@ export class RealtimeSession {
             const audioStream = await elevenlabs.generate({
                 voice: "e4WGXlfMTDZZRStMylyI", 
                 text: text,
+                // Using Multilingual V2 for better pacing/pauses as requested
                 model_id: "eleven_multilingual_v2", 
                 voice_settings: { stability: 0.5, similarity_boost: 0.75 }
             });
@@ -396,6 +459,9 @@ export class RealtimeSession {
             const buffer = Buffer.concat(chunks);
             this.ws.send(JSON.stringify({ type: 'ai_audio_chunk', audio: buffer.toString('base64') }));
 
+            // 🟢 Start listening for user response after speech is sent
+            this.startSilenceTimer();
+
         } catch (err) {
             console.error("ElevenLabs Error (Falling back to OpenAI):", err);
             try {
@@ -403,6 +469,8 @@ export class RealtimeSession {
                 const buffer = Buffer.from(await mp3.arrayBuffer());
                 this.ws.send(JSON.stringify({ type: 'ai_audio_chunk', audio: buffer.toString('base64') }));
             } catch (e) { console.error("OpenAI TTS Error:", e); }
+            
+            this.startSilenceTimer();
         }
     }
 }
