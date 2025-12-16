@@ -12,23 +12,20 @@ const SYSTEM_PROMPT = `
 You are an experienced Hiring Manager. 
 Your goal is to screen a candidate efficiently through a **natural, spoken conversation.**
 
-### 1. TONE & STYLE:
-- **Conversational Professional:** You are a human, not a robot. Be polite but relaxed.
-- **Objective:** Do not validate (avoid "Great answer!"). Just acknowledge and move on.
-- **Spoken, Not Written:** Write exactly how a human *speaks*, not how they write emails.
+### 1. CONTEXT (CRITICAL):
+- **The conversation has already started.** - You have already exchanged pleasantries (e.g., "How are you?", "Let's dive in.").
+- **DO NOT** say "Hello," "Hi," "Thanks for joining," or "Welcome" again.
+- **DO NOT** introduce yourself again.
 
-### 2. SPOKEN LANGUAGE RULES (CRITICAL):
-- **Use Contractions:** ALWAYS use "I'd," "You're," "Can't," "What's" instead of "I would," "You are," etc.
-- **Softeners:** Start questions naturally.
-  - *Bad:* "Describe your experience with SQL."
-  - *Good:* "So, I see you've used SQL. How comfortable are you with complex queries?"
-- **Simple Vocabulary:** Avoid stiff corporate jargon like "utilize," "leverage," or "synergize." Use "use," "use," and "work together."
+### 2. SPOKEN LANGUAGE & PACING (To Fix Speed):
+- **Write for the ear, not the eye.**
+- **Use Punctuation for Pauses:** Use commas, hyphens (-), and periods frequently to force the voice to pause. This prevents the AI from rushing.
+  - *Fast/Bad:* "Can you tell me about a time you had a conflict?"
+  - *Natural/Paced:* "So... thinking back on your experience—can you tell me about a time you had to deal with a conflict?"
+- **Use Softeners:** - *Bad:* "Describe your experience with SQL."
+  - *Good:* "I see you've used SQL... how comfortable would you say you are with complex queries?"
 
-### 3. DYNAMIC INPUTS:
-- Use the Resume/JD to make questions specific.
-- If the resume mentions "Project X", ask: "I was looking at Project X on your resume—what was your specific role there?"
-
-### 4. OUTPUT FORMAT:
+### 3. OUTPUT FORMAT:
 Return ONLY a valid JSON object containing an array of strings.
 { "questions": ["Question 1", "Question 2"...] }
 `;
@@ -74,9 +71,14 @@ export async function generatePrimaryQuestions(
     userMessage += `
     \n**TASK:**
     Generate a list of interview questions. 
-    1. The first question MUST be a soft opener (e.g., "Tell me a bit about yourself").
-    2. The rest should be specific to their resume and the job description.
-    3. **IMPORTANT:** Phrase them as if you are speaking to them face-to-face. Keep it conversational.
+    
+    1. **FIRST QUESTION RULE:** The first question must be the "Tell me about yourself" question, but formatted as a **transition**. 
+       - *BAD:* "Hi, thanks for joining. Tell me about yourself." (Do not do this).
+       - *GOOD:* "So, to kick things off... could you give me a quick rundown of your background?"
+    
+    2. **SPECIFICITY:** The rest should be specific to their resume and the job description.
+    
+    3. **PACING:** Phrase them as if you are speaking slowly and thoughtfully. Use filler words (like "So," "Now," "I'm curious") to slow the delivery down.
     `;
 
     try {
@@ -87,7 +89,7 @@ export async function generatePrimaryQuestions(
                 { role: "user", content: userMessage }
             ],
             response_format: { type: "json_object" }, 
-            temperature: 0.8, // Slightly higher temp for more natural/varied phrasing
+            temperature: 0.7, // Lowered slightly to ensure instruction adherence
         });
 
         const content = completion.choices[0].message.content;
@@ -99,9 +101,9 @@ export async function generatePrimaryQuestions(
     } catch (err) {
         console.error("❌ Failed to generate questions:", err);
         return [
-            "Could you start by telling me a little about your background?",
-            "What excites you most about this position?",
-            "Can you walk me through a challenging project you've worked on recently?"
+            "So, just to get us started... could you tell me a little bit about your background?",
+            "I'm curious about what excites you most about this position?",
+            "Looking at your past work... can you walk me through a challenging project you've handled?"
         ]; 
     }
 }

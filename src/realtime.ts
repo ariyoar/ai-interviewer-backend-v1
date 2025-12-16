@@ -36,8 +36,11 @@ export class RealtimeSession {
 
     // 🧠 Track if we are currently inside a follow-up loop
     private isInsideFollowUp: boolean = false;
+    
+    // 🔒 NEW: Track if we are in the process of hanging up to prevent race conditions
+    private isTerminating: boolean = false; 
 
-    // 🕒 NEW: Silence Tracking
+    // 🕒 Silence Tracking
     private silenceTimer: NodeJS.Timeout | null = null;
     private hasWarnedSilence: boolean = false;
 
@@ -72,6 +75,9 @@ export class RealtimeSession {
 
     // --- 🎤 HANDLE USER SPEECH ---
     public handleUserAudio(base64Audio: string) {
+        // If we are hanging up, ignore incoming audio to prevent zombie state
+        if (this.isTerminating) return; 
+
         // 🟢 NEW: User is alive! Kill the silence timer immediately.
         this.stopSilenceTimer(); 
         this.hasWarnedSilence = false; 
@@ -87,6 +93,8 @@ export class RealtimeSession {
     }
 
     public async commitUserAudio() {
+        if (this.isTerminating) return;
+
         console.log(`User finished speaking. Processing audio for state: ${this.state}`);
         
         if (this.audioBuffer.length === 0) {
@@ -102,6 +110,7 @@ export class RealtimeSession {
              console.log("⚠️ Whisper detected silence. Resetting Frontend.");
              this.ws.send(JSON.stringify({ type: 'ai_silence' })); 
              this.audioBuffer = []; 
+             this.startSilenceTimer(); // Restart timer if it was just silence
              return; 
         }
 
@@ -337,7 +346,11 @@ export class RealtimeSession {
         if (isDone) {
             this.state = 'CLOSING';
             await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
-            setTimeout(() => { this.ws.send(JSON.stringify({ type: 'interview.complete' })); }, 5000); 
+            
+            // --- UPDATED: Use centralized termination with event logic ---
+            setTimeout(() => { 
+                this.terminateSession("Interview Complete"); 
+            }, 5000); 
         } else {
             const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly and professionally. Ask "Any other questions?"`;
             const answer = await this.askGPT(prompt, 150);
@@ -373,7 +386,7 @@ export class RealtimeSession {
         } catch (e) { return false; }
     }
 
-    // --- 🕒 SILENCE MANAGEMENT (NEW NATURAL HANDLING) ---
+    // --- 🕒 SILENCE MANAGEMENT (UPDATED) ---
     private startSilenceTimer() {
         this.stopSilenceTimer(); // Clear existing
 
@@ -399,13 +412,12 @@ export class RealtimeSession {
                 // SECOND TIMEOUT: End the call politely
                 console.log("🕒 User still silent. Ending session.");
                 
-                // 🛑 NATURAL KILL MESSAGE
                 await this.speak("It looks like I might have lost you. I'm going to end the call for now, but feel free to reconnect whenever you're ready. Thanks.");
                 
-                // Wait for audio to finish playing, then close
+                // --- UPDATED: Trigger clean hangup ---
                 setTimeout(() => {
-                    this.ws.close(1000, "User inactivity");
-                }, 5000);
+                    this.terminateSession("Silence Timeout");
+                }, 4000);
             }
         }, 15000); // 15 Seconds Wait Time
     }
@@ -417,8 +429,37 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🔊 HELPER: SPEAK (With Safety Fallback) ---
+    // --- 📴 NEW HELPER: TERMINATE SESSION (FIX FOR HANGUP ISSUE) ---
+    // This ensures we send a message to the frontend to say "The call is over" 
+    // before we actually kill the connection.
+    private terminateSession(reason: string) {
+        if (this.isTerminating) return;
+        this.isTerminating = true;
+        
+        this.stopSilenceTimer();
+
+        console.log(`📴 Terminating Session: ${reason}`);
+
+        // 1. Send Explicit Event to Frontend to Hang Up the UI
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ 
+                type: 'call_ended', 
+                reason: reason 
+            }));
+        }
+
+        // 2. Force Close Socket shortly after to ensure message sends
+        setTimeout(() => {
+            if (this.ws.readyState === WebSocket.OPEN) {
+                this.ws.close(1000, reason);
+            }
+        }, 1000);
+    }
+
+    // --- 🔊 HELPER: SPEAK (UPDATED FOR VOICE SPEED) ---
     private async speak(text: string) {
+        if (this.isTerminating) return;
+
         console.log(`📤 Speaking: "${text}"`);
         
         // 🟢 Stop timer while AI is talking (don't interrupt self)
@@ -444,12 +485,14 @@ export class RealtimeSession {
         }
 
         try {
+            // --- UPDATED: MODEL AND STABILITY FOR PACING ---
             const audioStream = await elevenlabs.generate({
                 voice: "e4WGXlfMTDZZRStMylyI", 
                 text: text,
-                // Using Multilingual V2 for better pacing/pauses as requested
-                model_id: "eleven_multilingual_v2", 
-                voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+                // Changed from 'eleven_multilingual_v2' to 'eleven_turbo_v2_5' for better natural flow
+                model_id: "eleven_turbo_v2_5", 
+                // Lowered stability to 0.35 (was 0.5) to allow more pauses/breaths (slower feel)
+                voice_settings: { stability: 0.35, similarity_boost: 0.75 }
             });
 
             const chunks: Buffer[] = [];
