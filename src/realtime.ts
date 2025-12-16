@@ -474,45 +474,75 @@ export class RealtimeSession {
         }, 1000);
     }
 
-    // --- 🔊 HELPER: SPEAK (STREAMING) ---
+    // --- 🔊 HELPER: SPEAK (ROBUST: STREAMING + FALLBACK) ---
     private async speak(text: string) {
         if (this.isTerminating) return;
 
         console.log(`📤 Speaking: "${text}"`);
+        
+        // 1. Stop timer immediately
         this.stopSilenceTimer();
+
+        // 2. Send text transcript to frontend immediately
         await this.saveTranscript('assistant', text);
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
-        // FALLBACK: OpenAI TTS
-        if (!elevenlabs) {
+        let usedFallback = false;
+
+        // 🟢 TRY ELEVENLABS STREAMING
+        if (elevenlabs) {
             try {
-                const mp3 = await openai.audio.speech.create({ model: "tts-1", voice: "alloy", input: text });
-                const buffer = Buffer.from(await mp3.arrayBuffer());
-                this.ws.send(JSON.stringify({ type: 'ai_audio_chunk', audio: buffer.toString('base64') }));
-            } catch (e) { console.error("OpenAI TTS Error:", e); }
-            return;
+                const audioStream = await elevenlabs.generate({
+                    voice: "e4WGXlfMTDZZRStMylyI", 
+                    text: text,
+                    model_id: "eleven_turbo_v2_5", 
+                    stream: true, 
+                    voice_settings: { stability: 0.35, similarity_boost: 0.75 }
+                });
+
+                let chunkCount = 0;
+                for await (const chunk of audioStream) {
+                    if (this.isTerminating) break; 
+                    chunkCount++;
+                    const buffer = Buffer.from(chunk);
+                    this.ws.send(JSON.stringify({ 
+                        type: 'ai_audio_chunk', 
+                        audio: buffer.toString('base64') 
+                    }));
+                }
+                console.log(`✅ ElevenLabs streaming complete. Sent ${chunkCount} chunks.`);
+                return; // Success! Exit function.
+
+            } catch (err) {
+                console.error("⚠️ ElevenLabs Streaming Failed. Switching to Fallback.", err);
+                usedFallback = true;
+            }
+        } else {
+            console.warn("⚠️ ElevenLabs client not initialized. Using Fallback.");
+            usedFallback = true;
         }
 
-        try {
-            // STREAMING
-            const audioStream = await elevenlabs.generate({
-                voice: "e4WGXlfMTDZZRStMylyI", 
-                text: text,
-                model_id: "eleven_turbo_v2_5", 
-                stream: true, 
-                voice_settings: { stability: 0.35, similarity_boost: 0.75 }
-            });
-
-            for await (const chunk of audioStream) {
-                if (this.isTerminating) break; 
-                const buffer = Buffer.from(chunk);
+        // 🟠 FALLBACK: OPENAI TTS (If ElevenLabs failed or wasn't there)
+        if (usedFallback) {
+            try {
+                console.log("🔄 Generating audio with OpenAI Fallback...");
+                const mp3 = await openai.audio.speech.create({ 
+                    model: "tts-1", 
+                    voice: "alloy", 
+                    input: text 
+                });
+                const buffer = Buffer.from(await mp3.arrayBuffer());
+                
+                // Send as single large chunk
                 this.ws.send(JSON.stringify({ 
                     type: 'ai_audio_chunk', 
                     audio: buffer.toString('base64') 
                 }));
+                console.log(`✅ OpenAI audio sent (${buffer.length} bytes).`);
+
+            } catch (e) { 
+                console.error("❌ CRITICAL: Both ElevenLabs and OpenAI failed.", e); 
             }
-        } catch (err) {
-            console.error("ElevenLabs Error:", err);
         }
     }
 }
