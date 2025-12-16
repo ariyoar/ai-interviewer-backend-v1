@@ -34,6 +34,11 @@ export class RealtimeSession {
     private company: string = "";
     private jobDescription: string = ""; 
 
+    // ⏱️ TIME MANAGEMENT
+    private sessionStartTime: number = Date.now();
+    private sessionDurationMinutes: number = 30; // Default
+    private hardLimitTimer: NodeJS.Timeout | null = null;
+
     private isInsideFollowUp: boolean = false;
     private isTerminating: boolean = false; 
 
@@ -58,6 +63,28 @@ export class RealtimeSession {
         this.company = session.companyName || "our company";
         this.jobDescription = session.jobDescription || "";
         this.questions = session.questions.map(q => q.question);
+        
+        // ⏱️ FIX: Use 'durationMinutes' to match your Prisma Schema
+        this.sessionDurationMinutes = session.durationMinutes || 30; 
+        
+        this.sessionStartTime = Date.now();
+        console.log(`⏱️ Session started. Duration: ${this.sessionDurationMinutes} mins.`);
+
+        // 🛡️ HARD FAILSAFE (Duration + 2 Minutes)
+        const hardLimitMs = (this.sessionDurationMinutes + 2) * 60 * 1000;
+        
+        this.hardLimitTimer = setTimeout(async () => {
+            console.log("⏱️ Hard time limit reached. Interrupting user.");
+            this.stopSilenceTimer();
+
+            // Politely Interrupt
+            await this.speak("I apologize for the interruption, but we've hit our hard time limit for this session. Thank you for your time today. Goodbye!");
+            
+            setTimeout(() => {
+                this.terminateSession("Hard Time Limit Exceeded");
+            }, 6000);
+
+        }, hardLimitMs);
 
         this.handleIntro();
     }
@@ -70,8 +97,7 @@ export class RealtimeSession {
         this.state = 'SMALL_TALK'; 
     }
 
-    // --- 👂 NEW: FRONTEND TRIGGER ---
-    // ✅ FIX: Wait for frontend to finish audio before starting timer
+    // --- 👂 FRONTEND TRIGGER ---
     public handleAiPlaybackComplete() {
         console.log("👂 Frontend finished playing audio. Starting silence timer now.");
         if (!this.isTerminating) {
@@ -100,7 +126,6 @@ export class RealtimeSession {
         console.log(`User finished speaking. Processing audio for state: ${this.state}`);
         
         if (this.audioBuffer.length === 0) {
-             console.log("⚠️ Audio buffer empty. Resetting Frontend.");
              this.ws.send(JSON.stringify({ type: 'ai_silence' }));
              return;
         }
@@ -108,10 +133,8 @@ export class RealtimeSession {
         const { text: rawText, isSilence } = await this.transcribeAudio();
         
         if (isSilence || rawText.trim().length === 0) {
-             console.log("⚠️ Whisper detected silence. Resetting Frontend.");
              this.ws.send(JSON.stringify({ type: 'ai_silence' })); 
              this.audioBuffer = []; 
-             // IMPORTANT: Restart timer here because user "attempted" to speak but failed
              this.startSilenceTimer(); 
              return; 
         }
@@ -142,10 +165,7 @@ export class RealtimeSession {
                     createdAt: new Date()
                 }
             });
-            console.log(`💾 Saved ${sender} transcript to DB.`);
-        } catch (err) {
-            console.error("❌ Failed to save transcript:", err);
-        }
+        } catch (err) { console.error("DB Error:", err); }
     }
 
     // --- 👂 HELPER: TRANSCRIBE ---
@@ -154,7 +174,6 @@ export class RealtimeSession {
         const rawPCM = Buffer.concat(this.audioBuffer);
         const wavHeader = this.createWavHeader(rawPCM.length, 24000, 1, 16);
         const wavBuffer = Buffer.concat([wavHeader, rawPCM]);
-
         const tempFilePath = path.join(os.tmpdir(), `upload_${this.sessionId}_${Date.now()}.wav`);
         fs.writeFileSync(tempFilePath, wavBuffer);
 
@@ -164,19 +183,11 @@ export class RealtimeSession {
                 model: "whisper-1",
                 response_format: "verbose_json", 
             }) as any; 
-
             const noSpeechProb = response.segments?.[0]?.no_speech_prob || 0;
             const text = response.text || "";
-
-            console.log(`🔍 Analysis: Text="${text}", NoSpeechProb=${noSpeechProb.toFixed(2)}`);
-
-            if (noSpeechProb > 0.6) { 
-                return { text: "", isSilence: true };
-            }
+            if (noSpeechProb > 0.6) return { text: "", isSilence: true };
             return { text, isSilence: false };
-
         } catch (err) {
-            console.error("Transcription failed:", err);
             return { text: "", isSilence: true };
         } finally {
             if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
@@ -206,17 +217,10 @@ export class RealtimeSession {
         const systemPrompt = `
         Role: Hiring Manager. Phase: Welcome/Small Talk.
         User said: "${userText}" (in response to "How are you?").
-        
-        Task: Analyze the user's intent.
-        
-        1. **HOLD**: If user asks for time (e.g., "Wait", "Hold on", "Give me a minute", "Not ready").
-           - **RESPONSE RULE**: "No problem. Just keep in mind we have a limited slot. If you need more time to prepare, we can reschedule. Let me know."
-        
-        2. **CONTINUE**: If user answers normally.
-           - **RESPONSE RULE**: Acknowledge politely (e.g., "Glad to hear it") and transition to "Let's get started."
-           - 🛑 **DO NOT** summarize the user's answer. Just pivot.
-        
-        Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "Text to speak" }
+        Task: Analyze intent.
+        1. **HOLD**: If user asks for time. Response: "No problem. Keep in mind we have a limited slot. We can reschedule if needed."
+        2. **CONTINUE**: If user answers normally. Response: Acknowledge politely and transition.
+        Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "..." }
         `;
 
         try {
@@ -226,33 +230,29 @@ export class RealtimeSession {
                 response_format: { type: "json_object" },
                 temperature: 0.3
             });
-
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
             const decision = result.decision || "CONTINUE";
             const responseText = result.response || "Glad to hear it. Let's get started.";
 
             if (decision === "HOLD") {
                 await this.speak(responseText); 
-                // Manually start timer for Hold since user explicitly asked for time
                 this.startSilenceTimer(60000); 
                 return; 
             }
 
             await this.speak(responseText);
             await new Promise(resolve => setTimeout(resolve, 2000));
-
             this.state = 'INTERVIEW';
             this.askCurrentQuestion();
 
         } catch (err) {
-            console.error("Small Talk Error:", err);
             await this.speak("Great. Let's dive in.");
             this.state = 'INTERVIEW';
             this.askCurrentQuestion();
         }
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (UPDATED PROMPTS) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW (WITH GUARDRAILS) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
@@ -262,25 +262,21 @@ export class RealtimeSession {
             return;
         }
         
-        // ✅ FIX: Strict Guardrails against grading
         const systemPrompt = `
-        Role: You are the Interviewer speaking DIRECTLY TO THE CANDIDATE.
-        Current Question: "${currentQ}"
-        Candidate Answer: "${userText}"
+        Role: Interviewer speaking DIRECTLY TO CANDIDATE.
+        Question: "${currentQ}"
+        Answer: "${userText}"
+        Task: Analyze answer.
+        1. **HOLD**: User asks for time.
+        2. **FOLLOW_UP**: Vague/short answer.
+        3. **MOVE_ON**: Sufficient answer.
         
-        Task: Analyze the answer.
+        CRITICAL: 
+        - Speak in SECOND PERSON ("You").
+        - NEVER grade ("Good job").
+        - Use neutral bridges ("Thanks for sharing").
         
-        1. **HOLD**: If user asks for time.
-        2. **FOLLOW_UP**: If answer is vague/short.
-        3. **MOVE_ON**: If answer is sufficient.
-        
-        **CRITICAL RULE FOR "CONTENT":**
-        - Speak in the SECOND PERSON ("You").
-        - **NEVER** use the Third Person ("The candidate", "He/She").
-        - **NEVER** evaluate or grade them out loud (e.g., DO NOT say "The candidate showed good knowledge"). 
-        - Instead, say: "I see, thanks for sharing that example." or "Understood."
-        
-        Output JSON: { "decision": "HOLD" | "FOLLOW_UP" | "MOVE_ON", "content": "Text to speak" }
+        Output JSON: { "decision": "HOLD" | "FOLLOW_UP" | "MOVE_ON", "content": "..." }
         `;
 
         try {
@@ -310,39 +306,50 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🌉 SMART NEUTRAL NAVIGATION HELPER ---
+    // --- 🌉 SMART NAVIGATION (UPDATED FOR TIME CHECK) ---
     private async moveToNextQuestion(prevUserText: string | null, bridge: string = "") {
         this.currentQuestionIndex++;
 
-        if (this.currentQuestionIndex < this.questions.length) {
+        // ⏱️ TIME CHECK!
+        const elapsedMs = Date.now() - this.sessionStartTime;
+        const remainingMs = (this.sessionDurationMinutes * 60 * 1000) - elapsedMs;
+        const remainingMinutes = remainingMs / 1000 / 60;
+
+        console.log(`⏱️ Time Check: ${remainingMinutes.toFixed(1)} mins remaining.`);
+
+        // 🧠 DECISION LOGIC: Only ask if > 3 mins left
+        if (this.currentQuestionIndex < this.questions.length && remainingMinutes > 3) {
+            
             const nextQ = this.questions[this.currentQuestionIndex];
             let finalBridge = bridge;
             
             if (!finalBridge && prevUserText) {
-                // ✅ FIX: Strict Guardrails against grading
                 const prompt = `
-                You are a professional Interviewer speaking TO the candidate.
-                1. Candidate said: "${prevUserText}"
-                2. Next Question: "${nextQ}"
-                
-                Task: Generate a transition phrase.
-                - 🛑 STRICT RULE: DO NOT grade the answer (No "Great answer", No "You demonstrated skill").
-                - 🛑 STRICT RULE: Speak to them ("You"), not about them.
-                - Use neutral acknowledgments: "Thanks for that context", "Understood", "Noted".
+                Interviewer to Candidate.
+                Candidate said: "${prevUserText}"
+                Next Question: "${nextQ}"
+                Task: Transition phrase.
+                🛑 NO grading. Speak to "You". Neutral tone.
                 `;
                 finalBridge = await this.askGPT(prompt, 40);
             }
 
             if (finalBridge) {
                 await this.speak(finalBridge);
-                // Pause slightly between Bridge and Question
                 await new Promise(resolve => setTimeout(resolve, 800)); 
             }
             await this.speak(nextQ);
         } 
         else {
             this.state = 'Q_AND_A';
-            await this.speak("That covers the main questions I had.");
+            
+            let closingBridge = "That covers the main questions I had.";
+            
+            if (remainingMinutes <= 3) {
+                closingBridge = "Looking at the clock, I want to be respectful of your time, so let's pause the questions here.";
+            }
+
+            await this.speak(closingBridge);
             await new Promise(resolve => setTimeout(resolve, 800));
             await this.speak("Before we wrap up, do you have any questions for me about the role or company?");
         }
@@ -350,12 +357,22 @@ export class RealtimeSession {
 
     private async handleQandAResponse(userText: string) {
         const isDone = await this.checkIfDone(userText);
-        if (isDone) {
+        
+        // ⏱️ Double check time in Q&A
+        const elapsedMs = Date.now() - this.sessionStartTime;
+        const isOverTime = elapsedMs > (this.sessionDurationMinutes * 60 * 1000);
+
+        if (isDone || isOverTime) {
             this.state = 'CLOSING';
-            await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
+            if (isOverTime) {
+                await this.speak("We are officially out of time, but it was a pleasure meeting you. We'll be in touch shortly. Goodbye!");
+            } else {
+                await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
+            }
+            
             setTimeout(() => { 
                 this.terminateSession("Interview Complete"); 
-            }, 5000); 
+            }, 6000); 
         } else {
             const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly. Ask "Any other questions?"`;
             const answer = await this.askGPT(prompt, 150);
@@ -405,12 +422,12 @@ export class RealtimeSession {
 
                 if (this.state === 'INTRO' || this.state === 'SMALL_TALK') {
                     nudges = [
-                        "Hello? Are you still there? I'll have to end the call shortly if there's no response.",
+                        "Hello? Are you still there?",
                         "Just checking in—can you hear me?"
                     ];
                 } else {
                     nudges = [
-                        "Do you need a moment to think? Just let me know, otherwise I'll need to close the session in about 20 seconds.",
+                        "Do you need a moment to think?",
                         "Just checking in—are you still with me?"
                     ];
                 }
@@ -444,6 +461,8 @@ export class RealtimeSession {
         if (this.isTerminating) return;
         this.isTerminating = true;
         this.stopSilenceTimer();
+        if (this.hardLimitTimer) clearTimeout(this.hardLimitTimer);
+        
         console.log(`📴 Terminating Session: ${reason}`);
 
         if (this.ws.readyState === WebSocket.OPEN) {
@@ -455,15 +474,12 @@ export class RealtimeSession {
         }, 1000);
     }
 
-    // --- 🔊 HELPER: SPEAK (UPDATED WITH STREAMING) ---
+    // --- 🔊 HELPER: SPEAK (STREAMING) ---
     private async speak(text: string) {
         if (this.isTerminating) return;
 
         console.log(`📤 Speaking: "${text}"`);
-        
-        // 1. Stop timer immediately
         this.stopSilenceTimer();
-
         await this.saveTranscript('assistant', text);
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
@@ -478,28 +494,23 @@ export class RealtimeSession {
         }
 
         try {
-            // ✅ FIX: LOW LATENCY STREAMING
+            // STREAMING
             const audioStream = await elevenlabs.generate({
                 voice: "e4WGXlfMTDZZRStMylyI", 
                 text: text,
-                model_id: "eleven_turbo_v2_5", // Fastest model
-                stream: true, // Force streaming
+                model_id: "eleven_turbo_v2_5", 
+                stream: true, 
                 voice_settings: { stability: 0.35, similarity_boost: 0.75 }
             });
 
-            // ✅ Send chunks as they arrive!
             for await (const chunk of audioStream) {
-                if (this.isTerminating) break; // Stop if user hung up
+                if (this.isTerminating) break; 
                 const buffer = Buffer.from(chunk);
                 this.ws.send(JSON.stringify({ 
                     type: 'ai_audio_chunk', 
                     audio: buffer.toString('base64') 
                 }));
             }
-            
-            // 🛑 NOTE: We DO NOT start silence timer here anymore.
-            // We wait for handleAiPlaybackComplete() to be called.
-
         } catch (err) {
             console.error("ElevenLabs Error:", err);
         }
