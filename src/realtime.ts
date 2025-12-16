@@ -252,7 +252,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (UPDATED WITH REPEAT) ---
+   // --- 🔴 SMART LOGIC: INTERVIEW (WITH TECHNICAL PROBING) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
@@ -262,24 +262,29 @@ export class RealtimeSession {
             return;
         }
         
+        // ✅ NEW: Give AI context on the Role & Job so it can ask smart technical questions
         const systemPrompt = `
-        Role: Interviewer speaking DIRECTLY TO CANDIDATE.
-        Question: "${currentQ}"
-        Answer: "${userText}"
+        Role: Hiring Manager for the position of **${this.role}**.
+        Job Description Context: "${this.jobDescription.slice(0, 300)}..." 
         
-        Task: Analyze the candidate's answer and pick a DECISION.
+        Current Interview Question: "${currentQ}"
+        Candidate Answer: "${userText}"
         
-        1. **HOLD**: User asks for time (e.g., "Give me a minute", "Thinking").
-        2. **REPEAT**: User asks to repeat the question (e.g., "Say that again", "What was the question?", "I didn't hear you").
-        3. **FOLLOW_UP**: Answer is vague/short, or user asks for clarification.
-        4. **MOVE_ON**: Answer is sufficient.
+        Task: Analyze the answer and pick a DECISION.
+        
+        1. **HOLD**: If user asks for time (e.g. "Give me a minute").
+        2. **REPEAT**: If user asks to repeat the question.
+        3. **FOLLOW_UP**: 
+           - If the answer is vague/short.
+           - OR **(Crucial)**: If this is a highly technical role and the answer seems surface-level, ask a specific **technical probing question** to test their actual expertise in that area.
+        4. **MOVE_ON**: If answer is sufficient.
         
         CRITICAL RULES: 
         - Speak in SECOND PERSON ("You").
-        - **NEVER** grade the answer ("Good job").
-        - Use neutral bridges ("Thanks for sharing").
+        - **NEVER** grade ("Good job").
+        - Use neutral bridges ("Thanks for sharing", "Understood").
         
-        Output JSON: { "decision": "HOLD" | "REPEAT" | "FOLLOW_UP" | "MOVE_ON", "content": "..." }
+        Output JSON: { "decision": "HOLD" | "REPEAT" | "FOLLOW_UP" | "MOVE_ON", "content": "Text to speak" }
         `;
 
         try {
@@ -291,7 +296,7 @@ export class RealtimeSession {
             });
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
             
-            // 1. HOLD: Pause for thinking time
+            // 1. HOLD
             if (result.decision === "HOLD") {
                 console.log("⏸️ User asked for time.");
                 await this.speak("No problem at all, take your time to think.");
@@ -299,26 +304,24 @@ export class RealtimeSession {
                 return; 
             }
 
-            // 2. REPEAT: Repeat the question (Do not move next)
+            // 2. REPEAT
             if (result.decision === "REPEAT") {
                 console.log("Yz User asked to repeat.");
                 await this.speak("Sure. " + currentQ);
-                // We do NOT call moveToNextQuestion, so the state stays here.
                 return;
             }
 
-            // 3. FOLLOW UP: Ask for details
+            // 3. FOLLOW UP (Now includes Technical Probes)
             if (result.decision === "FOLLOW_UP") {
                 this.isInsideFollowUp = true; 
                 await this.speak(result.content);
             } 
-            // 4. MOVE ON: Next Question
+            // 4. MOVE ON
             else {
                 await this.moveToNextQuestion(null, result.content);
             }
 
         } catch (err) {
-            // Fallback
             await this.moveToNextQuestion("Thanks.");
         }
     }
