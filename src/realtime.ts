@@ -252,7 +252,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (WITH GUARDRAILS) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW (UPDATED WITH REPEAT) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
@@ -266,17 +266,20 @@ export class RealtimeSession {
         Role: Interviewer speaking DIRECTLY TO CANDIDATE.
         Question: "${currentQ}"
         Answer: "${userText}"
-        Task: Analyze answer.
-        1. **HOLD**: User asks for time.
-        2. **FOLLOW_UP**: Vague/short answer.
-        3. **MOVE_ON**: Sufficient answer.
         
-        CRITICAL: 
+        Task: Analyze the candidate's answer and pick a DECISION.
+        
+        1. **HOLD**: User asks for time (e.g., "Give me a minute", "Thinking").
+        2. **REPEAT**: User asks to repeat the question (e.g., "Say that again", "What was the question?", "I didn't hear you").
+        3. **FOLLOW_UP**: Answer is vague/short, or user asks for clarification.
+        4. **MOVE_ON**: Answer is sufficient.
+        
+        CRITICAL RULES: 
         - Speak in SECOND PERSON ("You").
-        - NEVER grade ("Good job").
+        - **NEVER** grade the answer ("Good job").
         - Use neutral bridges ("Thanks for sharing").
         
-        Output JSON: { "decision": "HOLD" | "FOLLOW_UP" | "MOVE_ON", "content": "..." }
+        Output JSON: { "decision": "HOLD" | "REPEAT" | "FOLLOW_UP" | "MOVE_ON", "content": "..." }
         `;
 
         try {
@@ -288,20 +291,34 @@ export class RealtimeSession {
             });
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
             
+            // 1. HOLD: Pause for thinking time
             if (result.decision === "HOLD") {
-                console.log("⏸️ User asked for time. Pausing...");
-                await this.speak("No problem, take your time.");
+                console.log("⏸️ User asked for time.");
+                await this.speak("No problem at all, take your time to think.");
                 this.startSilenceTimer(60000); 
                 return; 
             }
 
+            // 2. REPEAT: Repeat the question (Do not move next)
+            if (result.decision === "REPEAT") {
+                console.log("Yz User asked to repeat.");
+                await this.speak("Sure. " + currentQ);
+                // We do NOT call moveToNextQuestion, so the state stays here.
+                return;
+            }
+
+            // 3. FOLLOW UP: Ask for details
             if (result.decision === "FOLLOW_UP") {
                 this.isInsideFollowUp = true; 
                 await this.speak(result.content);
-            } else {
+            } 
+            // 4. MOVE ON: Next Question
+            else {
                 await this.moveToNextQuestion(null, result.content);
             }
+
         } catch (err) {
+            // Fallback
             await this.moveToNextQuestion("Thanks.");
         }
     }
