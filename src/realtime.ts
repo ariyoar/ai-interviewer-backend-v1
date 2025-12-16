@@ -10,7 +10,7 @@ import os from 'os';
 const prisma = new PrismaClient();
 const openai = new OpenAI();
 
-// 🚨 SAFE INITIALIZATION: Don't crash if key is missing
+// 🚨 SAFE INITIALIZATION
 let elevenlabs: ElevenLabsClient | null = null;
 if (process.env.ELEVENLABS_API_KEY) {
     try {
@@ -29,15 +29,12 @@ export class RealtimeSession {
     private state: SessionState = 'INTRO'; 
     private currentQuestionIndex: number = 0;
     private questions: string[] = [];
-    private audioBuffer: Buffer[] = []; // Stores Raw PCM16 chunks
+    private audioBuffer: Buffer[] = []; 
     private role: string = "";
     private company: string = "";
     private jobDescription: string = ""; 
 
-    // 🧠 Track if we are currently inside a follow-up loop
     private isInsideFollowUp: boolean = false;
-    
-    // 🔒 NEW: Track if we are in the process of hanging up to prevent race conditions
     private isTerminating: boolean = false; 
 
     // 🕒 Silence Tracking
@@ -76,8 +73,6 @@ export class RealtimeSession {
     // --- 🎤 HANDLE USER SPEECH ---
     public handleUserAudio(base64Audio: string) {
         if (this.isTerminating) return; 
-
-        // 🟢 NEW: User is alive! Kill the silence timer immediately.
         this.stopSilenceTimer(); 
         this.hasWarnedSilence = false; 
 
@@ -101,21 +96,18 @@ export class RealtimeSession {
              return;
         }
 
-        // 2. Transcribe
         const { text: rawText, isSilence } = await this.transcribeAudio();
         
         if (isSilence || rawText.trim().length === 0) {
              console.log("⚠️ Whisper detected silence. Resetting Frontend.");
              this.ws.send(JSON.stringify({ type: 'ai_silence' })); 
              this.audioBuffer = []; 
-             this.startSilenceTimer(); // Restart timer if it was just silence
+             this.startSilenceTimer(); 
              return; 
         }
 
         console.log(`🗣️ Valid User Speech: "${rawText}"`);
-        
         await this.saveTranscript('user', rawText);
-
         this.audioBuffer = []; 
 
         if (this.state === 'SMALL_TALK') {
@@ -199,22 +191,65 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC ---
+    // --- 🧠 SMART BANTER LOGIC (UPDATED FOR REALISTIC BOUNDARIES) ---
     private async handleSmallTalkResponse(userText: string) {
-        const prompt = `
-        You are a warm, professional Hiring Manager. 
+        // 1. Analyze if the user is ready or needs time
+        const systemPrompt = `
+        Role: Hiring Manager. Phase: Welcome/Small Talk.
         User said: "${userText}" (in response to "How are you?").
-        Task: Warmly acknowledge, then transition to interview.
-        🛑 DO NOT ask the first question yet.
+        
+        Task: Analyze the user's intent.
+        
+        1. **HOLD**: If user asks for time (e.g., "Wait", "Hold on", "Give me a minute", "Not ready").
+           - **RESPONSE RULE**: Be polite but firm about time limits. 
+           - Say: "No problem, take a moment. Just keep in mind we have a limited slot today. If you need more time to prepare, it might be better to reschedule and reconnect when you're ready. Let me know."
+        
+        2. **CONTINUE**: If user answers the greeting normally or says they are ready.
+           - **RESPONSE RULE**: Acknowledge politely (e.g., "Glad to hear it") and transition to "Let's get started."
+        
+        Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "Text to speak" }
         `;
-        const response = await this.askGPT(prompt, 60);
-        await this.speak(response);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        this.state = 'INTERVIEW';
-        this.askCurrentQuestion();
+
+        try {
+            const evaluation = await openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [{ role: "system", content: systemPrompt }],
+                response_format: { type: "json_object" },
+                temperature: 0.3
+            });
+
+            const result = JSON.parse(evaluation.choices[0].message.content || "{}");
+            const decision = result.decision || "CONTINUE";
+            const responseText = result.response || "Glad to hear it. Let's get started.";
+
+            // 🛑 HOLD LOGIC
+            if (decision === "HOLD") {
+                console.log("⏸️ User asked for time during Intro. Setting expectations...");
+                await this.speak(responseText); 
+                
+                // Set Long Timer (60s) to give them a chance to reply "I'm ready" or hang up
+                this.startSilenceTimer(60000);
+                return; 
+            }
+
+            // ✅ CONTINUE LOGIC
+            await this.speak(responseText);
+
+            // 2-second "Breather" before switching modes
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            this.state = 'INTERVIEW';
+            this.askCurrentQuestion();
+
+        } catch (err) {
+            console.error("Small Talk Error:", err);
+            await this.speak("Great. Let's dive in.");
+            this.state = 'INTERVIEW';
+            this.askCurrentQuestion();
+        }
     }
 
-    // --- 🔴 SMART LOGIC: INTERVIEW (UPDATED FOR HOLD & CONTEXT) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
@@ -355,7 +390,6 @@ export class RealtimeSession {
                 
                 let nudges: string[] = [];
 
-                // 🧠 CONTEXT CHECK: Are we just starting or deep in the interview?
                 if (this.state === 'INTRO' || this.state === 'SMALL_TALK') {
                     nudges = [
                         "Hello? Are you still there? I'll have to end the call shortly if there's no response.",
@@ -363,7 +397,6 @@ export class RealtimeSession {
                         "Just checking in—can you hear me?"
                     ];
                 } else {
-                    // INTERVIEW MODE: Explicitly offer time AND warn about auto-close
                     nudges = [
                         "Do you need a moment to think? Just let me know, otherwise I'll need to close the session in about 20 seconds.",
                         "I haven't heard from you. If you're thinking, just say 'I need a minute', otherwise I'll end the call to save time.",
@@ -375,7 +408,7 @@ export class RealtimeSession {
                 
                 await this.speak(randomNudge);
                 
-                // Restart timer for the "Kill" phase (give them 20 more seconds)
+                // Restart timer for the "Kill" phase
                 this.startSilenceTimer(20000); 
             } else {
                 // SECOND TIMEOUT: End the call politely
@@ -383,7 +416,6 @@ export class RealtimeSession {
                 
                 await this.speak("Since I haven't heard back, I'm going to end the interview now. You can try again later. Goodbye.");
                 
-                // --- Trigger clean hangup ---
                 setTimeout(() => {
                     this.terminateSession("Silence Timeout");
                 }, 4000);
