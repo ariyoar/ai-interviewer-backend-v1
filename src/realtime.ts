@@ -212,15 +212,26 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC ---
+    // --- 🧠 SMART BANTER LOGIC (FIXED: STRICT NO-QUESTION TRANSITION) ---
     private async handleSmallTalkResponse(userText: string) {
         const systemPrompt = `
         Role: Hiring Manager. Phase: Welcome/Small Talk.
         User said: "${userText}" (in response to "How are you?").
-        Task: Analyze intent.
-        1. **HOLD**: If user asks for time. Response: "No problem. Keep in mind we have a limited slot. We can reschedule if needed."
-        2. **CONTINUE**: If user answers normally. Response: Acknowledge politely and transition.
-        Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "..." }
+        
+        Task: Analyze the user's intent.
+        
+        1. **HOLD**: If user asks for time (e.g., "Wait", "Hold on", "Not ready").
+           - Response: "No problem. Just keep in mind we have a limited slot. If you need more time to prepare, we can reschedule. Let me know."
+        
+        2. **CONTINUE**: If user answers normally.
+           - **STRICT OUTPUT RULE**: You must output a SHORT transition phrase (under 8 words).
+           - **FORBIDDEN**: Do NOT ask a question. Do NOT use a question mark (?).
+           - **ALLOWED EXAMPLES**: 
+             "Glad to hear it. Let's get started."
+             "Great. Let's dive in."
+             "Good to know. Let's begin."
+        
+        Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "Text to speak" }
         `;
 
         try {
@@ -230,9 +241,16 @@ export class RealtimeSession {
                 response_format: { type: "json_object" },
                 temperature: 0.3
             });
+
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
             const decision = result.decision || "CONTINUE";
-            const responseText = result.response || "Glad to hear it. Let's get started.";
+            
+            // 🛡️ SAFETY NET: Fallback if LLM fails or hallucinates a question mark
+            let responseText = result.response || "Glad to hear it. Let's get started.";
+            if (decision === "CONTINUE" && responseText.includes("?")) {
+                console.log("⚠️ AI hallucinated a question. Overwriting with safe transition.");
+                responseText = "Glad to hear it. Let's get started.";
+            }
 
             if (decision === "HOLD") {
                 await this.speak(responseText); 
@@ -240,12 +258,18 @@ export class RealtimeSession {
                 return; 
             }
 
+            // 1. Speak the transition (Guaranteed to be a statement now)
             await this.speak(responseText);
+            
+            // 2. Wait 2 seconds for dramatic effect
             await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // 3. Switch mode and ask the REAL first question
             this.state = 'INTERVIEW';
             this.askCurrentQuestion();
 
         } catch (err) {
+            console.error("Small Talk Error:", err);
             await this.speak("Great. Let's dive in.");
             this.state = 'INTERVIEW';
             this.askCurrentQuestion();
