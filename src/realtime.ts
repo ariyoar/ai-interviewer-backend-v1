@@ -108,9 +108,8 @@ export class RealtimeSession {
     // --- 🎤 HANDLE USER SPEECH ---
     public handleUserAudio(base64Audio: string) {
         if (this.isTerminating) return; 
-        this.stopSilenceTimer(); 
-        this.hasWarnedSilence = false; 
-
+        // 🛑 DO NOT stop silence timer here (prevents noise from pausing timer)
+        
         try {
             const cleanBase64 = base64Audio.split(',').pop() || "";
             const buffer = Buffer.from(cleanBase64, 'base64');
@@ -125,6 +124,9 @@ export class RealtimeSession {
 
         console.log(`User finished speaking. Processing audio for state: ${this.state}`);
         
+        // Stop timer now because we are processing real speech
+        this.stopSilenceTimer();
+
         if (this.audioBuffer.length === 0) {
              this.ws.send(JSON.stringify({ type: 'ai_silence' }));
              return;
@@ -138,6 +140,9 @@ export class RealtimeSession {
              this.startSilenceTimer(); 
              return; 
         }
+
+        // ✅ Reset silence warning flag since user spoke
+        this.hasWarnedSilence = false;
 
         console.log(`🗣️ Valid User Speech: "${rawText}"`);
         await this.saveTranscript('user', rawText);
@@ -212,7 +217,16 @@ export class RealtimeSession {
         return header;
     }
 
-    // --- 🧠 SMART BANTER LOGIC (FIXED: STRICT NO-QUESTION TRANSITION) ---
+    // --- 🛡️ SANITIZATION HELPER (PREVENTS DOUBLE QUESTIONS) ---
+    private sanitizeBridge(text: string, fallback: string): string {
+        if (text.includes("?") || text.length > 100) {
+            console.log("⚠️ Bridge hallucinated a question. Sanitizing...");
+            return fallback;
+        }
+        return text;
+    }
+
+    // --- 🧠 SMART BANTER LOGIC ---
     private async handleSmallTalkResponse(userText: string) {
         const systemPrompt = `
         Role: Hiring Manager. Phase: Welcome/Small Talk.
@@ -226,10 +240,6 @@ export class RealtimeSession {
         2. **CONTINUE**: If user answers normally.
            - **STRICT OUTPUT RULE**: You must output a SHORT transition phrase (under 8 words).
            - **FORBIDDEN**: Do NOT ask a question. Do NOT use a question mark (?).
-           - **ALLOWED EXAMPLES**: 
-             "Glad to hear it. Let's get started."
-             "Great. Let's dive in."
-             "Good to know. Let's begin."
         
         Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "Text to speak" }
         `;
@@ -244,27 +254,23 @@ export class RealtimeSession {
 
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
             const decision = result.decision || "CONTINUE";
-            
-            // 🛡️ SAFETY NET: Fallback if LLM fails or hallucinates a question mark
             let responseText = result.response || "Glad to hear it. Let's get started.";
-            if (decision === "CONTINUE" && responseText.includes("?")) {
-                console.log("⚠️ AI hallucinated a question. Overwriting with safe transition.");
-                responseText = "Glad to hear it. Let's get started.";
+
+            // 🛡️ SANITIZE: Remove any hallucinated questions
+            if (decision === "CONTINUE") {
+                responseText = this.sanitizeBridge(responseText, "Glad to hear it. Let's get started.");
             }
 
             if (decision === "HOLD") {
                 await this.speak(responseText); 
-                this.startSilenceTimer(60000); 
+                // ✅ FIX: Use specialized HOLD timer
+                this.startHoldTimer(60000); 
                 return; 
             }
 
-            // 1. Speak the transition (Guaranteed to be a statement now)
             await this.speak(responseText);
-            
-            // 2. Wait 2 seconds for dramatic effect
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // 3. Switch mode and ask the REAL first question
             this.state = 'INTERVIEW';
             this.askCurrentQuestion();
 
@@ -286,7 +292,6 @@ export class RealtimeSession {
             return;
         }
         
-        // ✅ NEW: Give AI context on the Role & Job so it can ask smart technical questions
         const systemPrompt = `
         Role: Hiring Manager for the position of **${this.role}**.
         Job Description Context: "${this.jobDescription.slice(0, 300)}..." 
@@ -324,7 +329,8 @@ export class RealtimeSession {
             if (result.decision === "HOLD") {
                 console.log("⏸️ User asked for time.");
                 await this.speak("No problem at all, take your time to think.");
-                this.startSilenceTimer(60000); 
+                // ✅ FIX: Use specialized HOLD timer
+                this.startHoldTimer(60000); 
                 return; 
             }
 
@@ -335,7 +341,7 @@ export class RealtimeSession {
                 return;
             }
 
-            // 3. FOLLOW UP (Now includes Technical Probes)
+            // 3. FOLLOW UP
             if (result.decision === "FOLLOW_UP") {
                 this.isInsideFollowUp = true; 
                 await this.speak(result.content);
@@ -350,7 +356,7 @@ export class RealtimeSession {
         }
     }
 
-    // --- 🌉 SMART NAVIGATION (UPDATED FOR TIME CHECK) ---
+    // --- 🌉 SMART NAVIGATION (UPDATED FOR TIME CHECK & SANITIZATION) ---
     private async moveToNextQuestion(prevUserText: string | null, bridge: string = "") {
         this.currentQuestionIndex++;
 
@@ -374,13 +380,16 @@ export class RealtimeSession {
                 Next Question: "${nextQ}"
                 Task: Transition phrase.
                 🛑 NO grading. Speak to "You". Neutral tone.
+                🛑 **CRITICAL**: Do NOT ask a question. Output a statement ONLY.
                 `;
-                finalBridge = await this.askGPT(prompt, 40);
+                finalBridge = await this.askGPT(prompt, 30);
             }
 
+            // 🛡️ SANITIZE BRIDGE
             if (finalBridge) {
+                finalBridge = this.sanitizeBridge(finalBridge, "Thanks for sharing that.");
                 await this.speak(finalBridge);
-                await new Promise(resolve => setTimeout(resolve, 800)); 
+                await new Promise(resolve => setTimeout(resolve, 600)); 
             }
             await this.speak(nextQ);
         } 
@@ -452,7 +461,7 @@ export class RealtimeSession {
         } catch (e) { return false; }
     }
 
-    // --- 🕒 SILENCE MANAGEMENT ---
+    // --- 🕒 SILENCE MANAGEMENT (STANDARD) ---
     private startSilenceTimer(ms: number = 15000) {
         this.stopSilenceTimer(); // Clear existing
 
@@ -462,20 +471,11 @@ export class RealtimeSession {
                 console.log("🕒 User is silent. Sending nudge...");
                 this.hasWarnedSilence = true;
                 
-                let nudges: string[] = [];
-
-                if (this.state === 'INTRO' || this.state === 'SMALL_TALK') {
-                    nudges = [
-                        "Hello? Are you still there?",
-                        "Just checking in—can you hear me?"
-                    ];
-                } else {
-                    nudges = [
-                        "Do you need a moment to think?",
-                        "Just checking in—are you still with me?"
-                    ];
-                }
-
+                // Natural nudges
+                const nudges = [
+                    "I want to make sure the audio is working—are you still with me?",
+                    "Take your time thinking, but just let me know if you need me to repeat the question."
+                ];
                 const randomNudge = nudges[Math.floor(Math.random() * nudges.length)];
                 
                 await this.speak(randomNudge);
@@ -485,13 +485,37 @@ export class RealtimeSession {
             } else {
                 // SECOND TIMEOUT: End the call
                 console.log("🕒 User still silent. Ending session.");
-                await this.speak("Since I haven't heard back, I'm going to end the interview now. You can try again later. Goodbye.");
+                await this.speak("It looks like we might be having some connection issues. I'm going to end the call for now. Please feel free to reschedule. Goodbye!");
                 
                 setTimeout(() => {
                     this.terminateSession("Silence Timeout");
                 }, 4000);
             }
         }, ms); 
+    }
+
+    // --- 🛑 NEW: HOLD TIMER (DEDICATED) ---
+    // Fixes the "Do you need a moment?" infinite loop
+    private startHoldTimer(ms: number = 60000) {
+        this.stopSilenceTimer();
+
+        console.log("🕒 Starting HOLD timer (60s)...");
+        this.silenceTimer = setTimeout(async () => {
+            console.log("🕒 Hold timer expired. Checking in...");
+            
+            // Specialized prompt for someone who asked for time
+            const checkIns = [
+                "Just checking in—are you ready to continue?",
+                "Are you ready to move on, or do you need a few more seconds?"
+            ];
+            const randomCheckIn = checkIns[Math.floor(Math.random() * checkIns.length)];
+            
+            await this.speak(randomCheckIn);
+            
+            // Set warnings so next silence kills it
+            this.hasWarnedSilence = true; 
+            this.startSilenceTimer(20000); 
+        }, ms);
     }
 
     private stopSilenceTimer() {
