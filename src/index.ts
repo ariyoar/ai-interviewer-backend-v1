@@ -5,9 +5,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-const pdf = require('pdf-parse'); 
-import { generatePrimaryQuestions } from './openai'; 
-import { RealtimeSession } from './realtime';        
+const pdf = require('pdf-parse');
+import { generatePrimaryQuestions } from './openai';
+import { RealtimeSession } from './realtime';
 
 // Load environment variables
 dotenv.config();
@@ -20,7 +20,7 @@ const wss = new WebSocketServer({ server });
 
 // 2. CONFIGURE MIDDLEWARE
 app.use(cors({
-    origin: '*', 
+    origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
@@ -34,18 +34,18 @@ const activeSessions = new Map<string, RealtimeSession>();
 // --- REST API: Session Creation ---
 app.post('/api/session', async (req, res) => {
     try {
-        const { 
-            role, 
-            experience, 
-            durationMinutes, 
-            companyName, 
-            jobDescription, 
-            industry, 
+        const {
+            role,
+            experience,
+            durationMinutes,
+            companyName,
+            jobDescription,
+            industry,
             region,
             resumeText,
-            resumeFile 
+            resumeFile
         } = req.body;
-        
+
         console.log("📝 Received Session Request...");
 
         // --- 🔍 ROBUST PDF PARSING LOGIC ---
@@ -55,9 +55,18 @@ app.post('/api/session', async (req, res) => {
             console.log("📂 PDF File detected. Extracting text...");
             try {
                 const buffer = Buffer.from(resumeFile, 'base64');
+                console.log(`PO: Buffer created. Size: ${buffer.length} bytes.`);
+
                 const pdfData = await pdf(buffer);
+                console.log(`PO: PDF Parse complete. NumPages: ${pdfData.numpages}, Info:`, pdfData.info);
+
                 finalResumeText = pdfData.text.replace(/\n\s*\n/g, '\n').trim();
                 console.log(`✅ PDF Extracted! Length: ${finalResumeText.length} chars`);
+                if (finalResumeText.length < 100) {
+                    console.warn("⚠️ WARNING: Extracted text is suspiciously short:", finalResumeText);
+                } else {
+                    console.log("📄 Snippet:", finalResumeText.slice(0, 100));
+                }
             } catch (err) {
                 console.error("❌ PDF Parse failed:", err);
             }
@@ -74,7 +83,7 @@ app.post('/api/session', async (req, res) => {
                 console.warn("⚠️ Ignoring corrupt/garbage frontend resume text.");
             }
         }
-        
+
         if (!finalResumeText) {
             console.log("⚠️ No valid resume text found. Using placeholder.");
             finalResumeText = "Candidate summary not available.";
@@ -87,11 +96,11 @@ app.post('/api/session', async (req, res) => {
                 experience,
                 durationMinutes,
                 companyName,
-                region,           
-                industry,         
+                region,
+                industry,
                 jobDescription,
-                resumeText: finalResumeText, 
-                resumeFile: resumeFile ? "saved_as_base64" : null 
+                resumeText: finalResumeText,
+                resumeFile: resumeFile ? "saved_as_base64" : null
             }
         });
 
@@ -106,7 +115,7 @@ app.post('/api/session', async (req, res) => {
             companyName,
             industry,
             region,
-            resumeText: finalResumeText 
+            resumeText: finalResumeText
         });
 
         // 4. Save Questions to DB
@@ -145,7 +154,7 @@ wss.on('connection', (ws: WebSocket) => {
             if (data.type === 'init_session') {
                 currentSessionId = data.sessionId;
                 console.log(`Socket linked to session: ${currentSessionId}`);
-                
+
                 if (currentSessionId) {
                     const realtime = new RealtimeSession(ws, currentSessionId);
                     activeSessions.set(currentSessionId, realtime);
@@ -166,7 +175,7 @@ wss.on('connection', (ws: WebSocket) => {
                     console.log('User finished speaking. Committing audio...');
                     await session.commitUserAudio();
                 }
-                
+
                 // 4. 🚨 NEW: Handle Playback Complete Signal (Triggers Silence Timer)
                 else if (data.type === 'ai_playback_complete') {
                     console.log("📨 Received playback complete signal from frontend");
