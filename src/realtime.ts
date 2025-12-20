@@ -587,8 +587,11 @@ export class RealtimeSession {
                 });
                 const buffer = Buffer.from(await mp3.arrayBuffer());
 
-                // 🛑 NEW: Send in chunks for smoothness
-                this.sendAudioInChunks(buffer);
+                // 🛑 REVERT: Chunking corrupts MP3 frames. Send whole.
+                this.ws.send(JSON.stringify({
+                    type: 'ai_audio_chunk',
+                    audio: buffer.toString('base64')
+                }));
                 return;
             } catch (e) {
                 console.error("Filler TTS failed", e);
@@ -607,8 +610,11 @@ export class RealtimeSession {
             });
             const buffer = Buffer.from(await mp3.arrayBuffer());
 
-            // 🛑 NEW: Send in chunks for smoothness
-            this.sendAudioInChunks(buffer);
+            // 🛑 REVERT: Chunking corrupts MP3 frames. Send whole.
+            this.ws.send(JSON.stringify({
+                type: 'ai_audio_chunk',
+                audio: buffer.toString('base64')
+            }));
 
         } catch (e) {
             console.error("❌ CRITICAL: OpenAI TTS failed.", e);
@@ -684,24 +690,5 @@ export class RealtimeSession {
         const fillers = ["Mmhmm.", "Okay.", "Right."];
         const randomFiller = fillers[Math.floor(Math.random() * fillers.length)];
         await this.speak(randomFiller, true);
-    }
-
-    // --- 📦 CHUNK HELPER ---
-    private sendAudioInChunks(buffer: Buffer) {
-        const CHUNK_SIZE = 16 * 1024; // 16KB per chunk
-        let offset = 0;
-
-        while (offset < buffer.length) {
-            if (this.isTerminating) break;
-            const end = Math.min(offset + CHUNK_SIZE, buffer.length);
-            const chunk = buffer.subarray(offset, end);
-
-            this.ws.send(JSON.stringify({
-                type: 'ai_audio_chunk',
-                audio: chunk.toString('base64')
-            }));
-
-            offset += CHUNK_SIZE;
-        }
     }
 }
