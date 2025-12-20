@@ -187,23 +187,24 @@ export class RealtimeSession {
         const rawPCM = Buffer.concat(this.audioBuffer);
         const wavHeader = this.createWavHeader(rawPCM.length, 24000, 1, 16);
         const wavBuffer = Buffer.concat([wavHeader, rawPCM]);
-        const tempFilePath = path.join(os.tmpdir(), `upload_${this.sessionId}_${Date.now()}.wav`);
-        fs.writeFileSync(tempFilePath, wavBuffer);
 
+        // ⚡ OPTIMIZATION: In-Memory Upload (No Disk I/O)
         try {
+            const file = await OpenAI.toFile(wavBuffer, `audio-${this.sessionId}.wav`);
+
             const response = await openai.audio.transcriptions.create({
-                file: fs.createReadStream(tempFilePath),
+                file: file,
                 model: "whisper-1",
                 response_format: "verbose_json",
             }) as any;
+
             const noSpeechProb = response.segments?.[0]?.no_speech_prob || 0;
             const text = response.text || "";
             if (noSpeechProb > 0.6) return { text: "", isSilence: true };
             return { text, isSilence: false };
         } catch (err) {
+            console.error("Transcribe Error:", err);
             return { text: "", isSilence: true };
-        } finally {
-            if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
         }
     }
 
