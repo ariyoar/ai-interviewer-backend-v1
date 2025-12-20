@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY, 
+    apiKey: process.env.OPENAI_API_KEY,
 });
 
 const SYSTEM_PROMPT = `
@@ -18,12 +18,15 @@ Your goal is to screen a candidate efficiently through a **natural, spoken conve
 - **DO NOT** introduce yourself again.
 
 ### 2. SPOKEN LANGUAGE & PACING (To Fix Speed):
-- **Write for the ear, not the eye.**
-- **Use Punctuation for Pauses:** Use commas, hyphens (-), and periods frequently to force the voice to pause. This prevents the AI from rushing.
-  - *Fast/Bad:* "Can you tell me about a time you had a conflict?"
-  - *Natural/Paced:* "So... thinking back on your experience—can you tell me about a time you had to deal with a conflict?"
-- **Use Softeners:** - *Bad:* "Describe your experience with SQL."
-  - *Good:* "I see you've used SQL... how comfortable would you say you are with complex queries?"
+- **Write for the ear, not the ear.**
+- **TONE**: "Casual Professional". Imagine you are a colleague having coffee, NOT a robot reading a script.
+- **ANTI-HR MODE**: 
+  - 🚫 AVOID: "Can you describe a time..." / "Tell me about a situation..."
+  - ✅ USE: "I'm curious about..." / "So, looking at your background here..." / "How did you handle it when..."
+- **Use Punctuation for Pauses:** Use commas, hyphens (-), and ellipses (...) to force natural pauses.
+- **Use Softeners:** 
+  - *Bad:* "Describe your experience with SQL."
+  - *Good:* "I see you've used SQL quite a bit... honestly, how comfortable are you with the really complex queries?"
 
 ### 3. OUTPUT FORMAT:
 Return ONLY a valid JSON object containing an array of strings.
@@ -42,7 +45,7 @@ export async function generatePrimaryQuestions(
         resumeText?: string
     }
 ): Promise<string[]> {
-    
+
     console.log(`🧠 Generating questions for ${context.role}...`);
 
     let userMessage = `
@@ -53,7 +56,7 @@ export async function generatePrimaryQuestions(
     - Industry: ${context.industry || "General"}
     - Interview Duration: ${context.duration} minutes (Aim for ~${Math.max(3, Math.floor(context.duration / 3))} questions)
     `;
-    
+
     if (context.region) {
         userMessage += `\n- Region: ${context.region} (Ensure cultural norms match this region).`;
     }
@@ -83,12 +86,12 @@ export async function generatePrimaryQuestions(
 
     try {
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o", 
+            model: "gpt-4o",
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: userMessage }
             ],
-            response_format: { type: "json_object" }, 
+            response_format: { type: "json_object" },
             temperature: 0.7, // Lowered slightly to ensure instruction adherence
         });
 
@@ -104,6 +107,6 @@ export async function generatePrimaryQuestions(
             "So, just to get us started... could you tell me a little bit about your background?",
             "I'm curious about what excites you most about this position?",
             "Looking at your past work... can you walk me through a challenging project you've handled?"
-        ]; 
+        ];
     }
 }

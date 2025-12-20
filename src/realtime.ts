@@ -132,10 +132,13 @@ export class RealtimeSession {
             return;
         }
 
-        // 🟢 ACTIVE LISTENING: Immediate Acknowledgment
-        // Since we know the user pressed 'stop', we can safely say "Mmhmm/Okay"
-        // to mask the latency of transcription + GPT + generation.
-        this.playFiller();
+        // 🟢 ACTIVE LISTENING: Immediate Acknowledgment (Conditional)
+        // Only if audio is substantial (e.g. > 0.2s) to avoid fillers on quick "unmute-click"
+        const totalBytes = this.audioBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
+        // Threshold: 4000 bytes ~ 0.15s - 0.2s of audio (approx)
+        if (totalBytes > 4000) {
+            this.playFiller();
+        }
 
         const { text: rawText, isSilence } = await this.transcribeAudio();
 
@@ -243,8 +246,11 @@ export class RealtimeSession {
            - Response: "No problem. Just keep in mind we have a limited slot. If you need more time to prepare, we can reschedule. Let me know."
         
         2. **CONTINUE**: If user answers normally.
-           - **STRICT OUTPUT RULE**: You must output a SHORT transition phrase (under 8 words).
-           - **FORBIDDEN**: Do NOT ask a question. Do NOT use a question mark (?).
+           - **RECIPROCITY**: If user asked "And you?" or "How about you?", respond politely ("I'm doing well, thanks!").
+           - **TRANSITION**: Then move immediately to the start.
+           - **CONSTRAINT**: Keep it brief (under 15 words).
+           - **FORBIDDEN**: Do NOT ask a "How are you" question back. Do NOT use a question mark (?). 
+           - **START**: Do NOT start with "Mmhmm", "Okay", or "Right" (audio layer handles this).
         
         Output JSON: { "decision": "HOLD" | "CONTINUE", "response": "Text to speak" }
         `;
@@ -319,6 +325,7 @@ export class RealtimeSession {
         - Use neutral bridges ("Thanks for sharing", "Understood").
         - **TONE**: Conversational and professional. 
         - **NATURALNESS**: VERY IMPORTANT. Occasionally use "umm", "ah", or "hmm" to sound like a human thinking. Use "..." for pauses. Don't be too perfect.
+        - **START**: Do NOT start with "Mmhmm", "Okay", or "Right" (audio layer handles this). Start with the content.
         
         Output JSON: { "decision": "HOLD" | "REPEAT" | "FOLLOW_UP" | "MOVE_ON", "content": "Text to speak" }
         `;
@@ -388,7 +395,8 @@ export class RealtimeSession {
                 Task: Transition phrase.
                 🛑 NO grading. Speak to "You". Neutral tone.
                 🛑 **CRITICAL**: Do NOT ask a question. Output a statement ONLY.
-                🛑 **NATURAL**: You can start with "Hmm," or "Okay, uhm," to sound natural.
+                🛑 **NATURAL**: You can start with "Hmm," or "So," or "I see,".
+                🛑 **START**: Do NOT start with "Mmhmm", "Okay", or "Right" (we already said that).
                 `;
                 finalBridge = await this.askGPT(prompt, 30);
             }
@@ -685,9 +693,9 @@ export class RealtimeSession {
     // --- 🎭 ACTIVE LISTENING FILLERS ---
     private async playFiller() {
         // 🛡️ REFINED FILLERS: Must be neutral enough to work if user asks a question.
-        // Bad: "I see", "Understood" (weird if user said "Can you repeat?")
-        // Good: "Mmhmm", "Okay", "Right"
-        const fillers = ["Mmhmm.", "Okay.", "Right."];
+        // Bad: "Understood" (weird if user said "Can you repeat?")
+        // Good: "Mmhmm", "Okay", "Right", "I see", "Interesting"
+        const fillers = ["Mmhmm.", "Okay.", "Right.", "I see.", "Interesting."];
         const randomFiller = fillers[Math.floor(Math.random() * fillers.length)];
         await this.speak(randomFiller, true);
     }
