@@ -54,7 +54,12 @@ app.post('/api/session', async (req, res) => {
         if (resumeFile) {
             console.log("📂 PDF File detected. Extracting text...");
             try {
-                const buffer = Buffer.from(resumeFile, 'base64');
+                // 1. Sanitize Base64 (remove data URI scheme if present)
+                const base64Clean = resumeFile.replace(/^data:.*,/, '');
+                console.log(`PO: Base64 Header (Raw): ${resumeFile.slice(0, 30)}...`);
+                console.log(`PO: Base64 Cleaned? ${resumeFile !== base64Clean}`);
+
+                const buffer = Buffer.from(base64Clean, 'base64');
                 console.log(`PO: Buffer created. Size: ${buffer.length} bytes.`);
 
                 const pdfData = await pdf(buffer);
