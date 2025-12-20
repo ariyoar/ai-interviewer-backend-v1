@@ -1,7 +1,7 @@
 // src/realtime.ts
 import { WebSocket } from 'ws';
 import OpenAI from 'openai';
-import { ElevenLabsClient } from 'elevenlabs'; 
+import { ElevenLabsClient } from 'elevenlabs';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
@@ -26,13 +26,13 @@ type SessionState = 'INTRO' | 'SMALL_TALK' | 'INTERVIEW' | 'Q_AND_A' | 'CLOSING'
 export class RealtimeSession {
     private ws: WebSocket;
     private sessionId: string;
-    private state: SessionState = 'INTRO'; 
+    private state: SessionState = 'INTRO';
     private currentQuestionIndex: number = 0;
     private questions: string[] = [];
-    private audioBuffer: Buffer[] = []; 
+    private audioBuffer: Buffer[] = [];
     private role: string = "";
     private company: string = "";
-    private jobDescription: string = ""; 
+    private jobDescription: string = "";
 
     // ⏱️ TIME MANAGEMENT
     private sessionStartTime: number = Date.now();
@@ -40,7 +40,7 @@ export class RealtimeSession {
     private hardLimitTimer: NodeJS.Timeout | null = null;
 
     private isInsideFollowUp: boolean = false;
-    private isTerminating: boolean = false; 
+    private isTerminating: boolean = false;
 
     // 🕒 Silence Tracking
     private silenceTimer: NodeJS.Timeout | null = null;
@@ -63,23 +63,23 @@ export class RealtimeSession {
         this.company = session.companyName || "our company";
         this.jobDescription = session.jobDescription || "";
         this.questions = session.questions.map(q => q.question);
-        
+
         // ⏱️ FIX: Use 'durationMinutes' to match your Prisma Schema
-        this.sessionDurationMinutes = session.durationMinutes || 30; 
-        
+        this.sessionDurationMinutes = session.durationMinutes || 30;
+
         this.sessionStartTime = Date.now();
         console.log(`⏱️ Session started. Duration: ${this.sessionDurationMinutes} mins.`);
 
         // 🛡️ HARD FAILSAFE (Duration + 2 Minutes)
         const hardLimitMs = (this.sessionDurationMinutes + 2) * 60 * 1000;
-        
+
         this.hardLimitTimer = setTimeout(async () => {
             console.log("⏱️ Hard time limit reached. Interrupting user.");
             this.stopSilenceTimer();
 
             // Politely Interrupt
             await this.speak("I apologize for the interruption, but we've hit our hard time limit for this session. Thank you for your time today. Goodbye!");
-            
+
             setTimeout(() => {
                 this.terminateSession("Hard Time Limit Exceeded");
             }, 6000);
@@ -94,7 +94,7 @@ export class RealtimeSession {
         console.log("👋 Sending Intro Greeting...");
         const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
         await this.speak(greeting);
-        this.state = 'SMALL_TALK'; 
+        this.state = 'SMALL_TALK';
     }
 
     // --- 👂 FRONTEND TRIGGER ---
@@ -107,9 +107,9 @@ export class RealtimeSession {
 
     // --- 🎤 HANDLE USER SPEECH ---
     public handleUserAudio(base64Audio: string) {
-        if (this.isTerminating) return; 
+        if (this.isTerminating) return;
         // 🛑 DO NOT stop silence timer here (prevents noise from pausing timer)
-        
+
         try {
             const cleanBase64 = base64Audio.split(',').pop() || "";
             const buffer = Buffer.from(cleanBase64, 'base64');
@@ -123,22 +123,27 @@ export class RealtimeSession {
         if (this.isTerminating) return;
 
         console.log(`User finished speaking. Processing audio for state: ${this.state}`);
-        
+
         // Stop timer now because we are processing real speech
         this.stopSilenceTimer();
 
         if (this.audioBuffer.length === 0) {
-             this.ws.send(JSON.stringify({ type: 'ai_silence' }));
-             return;
+            this.ws.send(JSON.stringify({ type: 'ai_silence' }));
+            return;
         }
 
+        // 🟢 ACTIVE LISTENING: Immediate Acknowledgment
+        // Since we know the user pressed 'stop', we can safely say "Mmhmm/Okay"
+        // to mask the latency of transcription + GPT + generation.
+        this.playFiller();
+
         const { text: rawText, isSilence } = await this.transcribeAudio();
-        
+
         if (isSilence || rawText.trim().length === 0) {
-             this.ws.send(JSON.stringify({ type: 'ai_silence' })); 
-             this.audioBuffer = []; 
-             this.startSilenceTimer(); 
-             return; 
+            this.ws.send(JSON.stringify({ type: 'ai_silence' }));
+            this.audioBuffer = [];
+            this.startSilenceTimer();
+            return;
         }
 
         // ✅ Reset silence warning flag since user spoke
@@ -146,11 +151,11 @@ export class RealtimeSession {
 
         console.log(`🗣️ Valid User Speech: "${rawText}"`);
         await this.saveTranscript('user', rawText);
-        this.audioBuffer = []; 
+        this.audioBuffer = [];
 
         if (this.state === 'SMALL_TALK') {
             await this.handleSmallTalkResponse(rawText);
-        } 
+        }
         else if (this.state === 'INTERVIEW') {
             await this.handleInterviewResponse(rawText);
         }
@@ -186,8 +191,8 @@ export class RealtimeSession {
             const response = await openai.audio.transcriptions.create({
                 file: fs.createReadStream(tempFilePath),
                 model: "whisper-1",
-                response_format: "verbose_json", 
-            }) as any; 
+                response_format: "verbose_json",
+            }) as any;
             const noSpeechProb = response.segments?.[0]?.no_speech_prob || 0;
             const text = response.text || "";
             if (noSpeechProb > 0.6) return { text: "", isSilence: true };
@@ -262,10 +267,10 @@ export class RealtimeSession {
             }
 
             if (decision === "HOLD") {
-                await this.speak(responseText); 
+                await this.speak(responseText);
                 // ✅ FIX: Use specialized HOLD timer
-                this.startHoldTimer(60000); 
-                return; 
+                this.startHoldTimer(60000);
+                return;
             }
 
             await this.speak(responseText);
@@ -282,16 +287,16 @@ export class RealtimeSession {
         }
     }
 
-   // --- 🔴 SMART LOGIC: INTERVIEW (WITH TECHNICAL PROBING) ---
+    // --- 🔴 SMART LOGIC: INTERVIEW (WITH TECHNICAL PROBING) ---
     private async handleInterviewResponse(userText: string) {
         const currentQ = this.questions[this.currentQuestionIndex];
 
         if (this.isInsideFollowUp) {
             this.isInsideFollowUp = false;
-            await this.moveToNextQuestion(userText); 
+            await this.moveToNextQuestion(userText);
             return;
         }
-        
+
         const systemPrompt = `
         Role: Hiring Manager for the position of **${this.role}**.
         Job Description Context: "${this.jobDescription.slice(0, 300)}..." 
@@ -312,6 +317,8 @@ export class RealtimeSession {
         - Speak in SECOND PERSON ("You").
         - **NEVER** grade ("Good job").
         - Use neutral bridges ("Thanks for sharing", "Understood").
+        - **TONE**: Conversational and professional. 
+        - **NATURALNESS**: VERY IMPORTANT. Occasionally use "umm", "ah", or "hmm" to sound like a human thinking. Use "..." for pauses. Don't be too perfect.
         
         Output JSON: { "decision": "HOLD" | "REPEAT" | "FOLLOW_UP" | "MOVE_ON", "content": "Text to speak" }
         `;
@@ -324,14 +331,14 @@ export class RealtimeSession {
                 temperature: 0.3
             });
             const result = JSON.parse(evaluation.choices[0].message.content || "{}");
-            
+
             // 1. HOLD
             if (result.decision === "HOLD") {
                 console.log("⏸️ User asked for time.");
                 await this.speak("No problem at all, take your time to think.");
                 // ✅ FIX: Use specialized HOLD timer
-                this.startHoldTimer(60000); 
-                return; 
+                this.startHoldTimer(60000);
+                return;
             }
 
             // 2. REPEAT
@@ -343,9 +350,9 @@ export class RealtimeSession {
 
             // 3. FOLLOW UP
             if (result.decision === "FOLLOW_UP") {
-                this.isInsideFollowUp = true; 
+                this.isInsideFollowUp = true;
                 await this.speak(result.content);
-            } 
+            }
             // 4. MOVE ON
             else {
                 await this.moveToNextQuestion(null, result.content);
@@ -369,10 +376,10 @@ export class RealtimeSession {
 
         // 🧠 DECISION LOGIC: Only ask if > 3 mins left
         if (this.currentQuestionIndex < this.questions.length && remainingMinutes > 3) {
-            
+
             const nextQ = this.questions[this.currentQuestionIndex];
             let finalBridge = bridge;
-            
+
             if (!finalBridge && prevUserText) {
                 const prompt = `
                 Interviewer to Candidate.
@@ -381,6 +388,7 @@ export class RealtimeSession {
                 Task: Transition phrase.
                 🛑 NO grading. Speak to "You". Neutral tone.
                 🛑 **CRITICAL**: Do NOT ask a question. Output a statement ONLY.
+                🛑 **NATURAL**: You can start with "Hmm," or "Okay, uhm," to sound natural.
                 `;
                 finalBridge = await this.askGPT(prompt, 30);
             }
@@ -389,15 +397,15 @@ export class RealtimeSession {
             if (finalBridge) {
                 finalBridge = this.sanitizeBridge(finalBridge, "Thanks for sharing that.");
                 await this.speak(finalBridge);
-                await new Promise(resolve => setTimeout(resolve, 600)); 
+                await new Promise(resolve => setTimeout(resolve, 600));
             }
             await this.speak(nextQ);
-        } 
+        }
         else {
             this.state = 'Q_AND_A';
-            
+
             let closingBridge = "That covers the main questions I had.";
-            
+
             if (remainingMinutes <= 3) {
                 closingBridge = "Looking at the clock, I want to be respectful of your time, so let's pause the questions here.";
             }
@@ -410,7 +418,7 @@ export class RealtimeSession {
 
     private async handleQandAResponse(userText: string) {
         const isDone = await this.checkIfDone(userText);
-        
+
         // ⏱️ Double check time in Q&A
         const elapsedMs = Date.now() - this.sessionStartTime;
         const isOverTime = elapsedMs > (this.sessionDurationMinutes * 60 * 1000);
@@ -422,10 +430,10 @@ export class RealtimeSession {
             } else {
                 await this.speak("Great! It was a pleasure meeting you. We will be in touch shortly. Have a great day!");
             }
-            
-            setTimeout(() => { 
-                this.terminateSession("Interview Complete"); 
-            }, 6000); 
+
+            setTimeout(() => {
+                this.terminateSession("Interview Complete");
+            }, 6000);
         } else {
             const prompt = `Hiring Manager for ${this.role}. Context: ${this.jobDescription}. User asked: "${userText}". Answer briefly. Ask "Any other questions?"`;
             const answer = await this.askGPT(prompt, 150);
@@ -442,7 +450,7 @@ export class RealtimeSession {
     private async askGPT(systemPrompt: string, maxTokens: number = 100): Promise<string> {
         try {
             const response = await openai.chat.completions.create({
-                model: "gpt-4o-mini", 
+                model: "gpt-4o-mini",
                 messages: [{ role: "system", content: systemPrompt }],
                 max_tokens: maxTokens
             });
@@ -466,32 +474,40 @@ export class RealtimeSession {
         this.stopSilenceTimer(); // Clear existing
 
         this.silenceTimer = setTimeout(async () => {
+            // 🚨 ACTIVE SPEECH CHECK: If buffer has data, user is speaking!
+            // Do not interrupt. Extend timer.
+            if (this.audioBuffer.length > 0) {
+                console.log("WAIT (Silence Timer): Audio buffer active. Extending timer...");
+                this.startSilenceTimer(5000); // Check again in 5s
+                return;
+            }
+
             if (!this.hasWarnedSilence) {
                 // FIRST TIMEOUT: Nudge
                 console.log("🕒 User is silent. Sending nudge...");
                 this.hasWarnedSilence = true;
-                
+
                 // Natural nudges
                 const nudges = [
                     "I want to make sure the audio is working—are you still with me?",
                     "Take your time thinking, but just let me know if you need me to repeat the question."
                 ];
                 const randomNudge = nudges[Math.floor(Math.random() * nudges.length)];
-                
+
                 await this.speak(randomNudge);
-                
+
                 // Restart timer for the "Kill" phase
-                this.startSilenceTimer(20000); 
+                this.startSilenceTimer(20000);
             } else {
                 // SECOND TIMEOUT: End the call
                 console.log("🕒 User still silent. Ending session.");
                 await this.speak("It looks like we might be having some connection issues. I'm going to end the call for now. Please feel free to reschedule. Goodbye!");
-                
+
                 setTimeout(() => {
                     this.terminateSession("Silence Timeout");
                 }, 4000);
             }
-        }, ms); 
+        }, ms);
     }
 
     // --- 🛑 NEW: HOLD TIMER (DEDICATED) ---
@@ -502,19 +518,19 @@ export class RealtimeSession {
         console.log("🕒 Starting HOLD timer (60s)...");
         this.silenceTimer = setTimeout(async () => {
             console.log("🕒 Hold timer expired. Checking in...");
-            
+
             // Specialized prompt for someone who asked for time
             const checkIns = [
                 "Just checking in—are you ready to continue?",
                 "Are you ready to move on, or do you need a few more seconds?"
             ];
             const randomCheckIn = checkIns[Math.floor(Math.random() * checkIns.length)];
-            
+
             await this.speak(randomCheckIn);
-            
+
             // Set warnings so next silence kills it
-            this.hasWarnedSilence = true; 
-            this.startSilenceTimer(20000); 
+            this.hasWarnedSilence = true;
+            this.startSilenceTimer(20000);
         }, ms);
     }
 
@@ -530,7 +546,7 @@ export class RealtimeSession {
         this.isTerminating = true;
         this.stopSilenceTimer();
         if (this.hardLimitTimer) clearTimeout(this.hardLimitTimer);
-        
+
         console.log(`📴 Terminating Session: ${reason}`);
 
         if (this.ws.readyState === WebSocket.OPEN) {
@@ -543,39 +559,87 @@ export class RealtimeSession {
     }
 
     // --- 🔊 HELPER: SPEAK (ROBUST: STREAMING + FALLBACK) ---
-    private async speak(text: string) {
+    private async speak(text: string, isFiller: boolean = false) {
         if (this.isTerminating) return;
 
-        console.log(`📤 Speaking: "${text}"`);
-        
+        console.log(`📤 Speaking: "${text}" (Filler: ${isFiller})`);
+
         // 1. Stop timer immediately
         this.stopSilenceTimer();
 
         // 2. Send text transcript to frontend immediately
-        await this.saveTranscript('assistant', text);
+        // Only save to DB if it's NOT a filler (to keep transcripts clean)
+        if (!isFiller) {
+            await this.saveTranscript('assistant', text);
+        }
+
         this.ws.send(JSON.stringify({ type: 'ai_text', text }));
 
-        let usedFallback = false;
+        // 🚨 FILLER OPTIMIZATION: Always use OpenAI TTS for fillers
+        // Why? It's faster (lower latency) for short words than starting an ElevenLabs stream.
+        if (isFiller) {
+            try {
+                const mp3 = await openai.audio.speech.create({
+                    model: "tts-1",
+                    voice: "shimmer", // Professional, clear female voice
+                    input: text,
+                    speed: 1.15
+                });
+                const buffer = Buffer.from(await mp3.arrayBuffer());
+                this.ws.send(JSON.stringify({
+                    type: 'ai_audio_chunk',
+                    audio: buffer.toString('base64')
+                }));
+                return;
+            } catch (e) {
+                console.error("Filler TTS failed", e);
+            }
+        }
 
-        // 🟢 TRY ELEVENLABS STREAMING
+        // 🟢 OPENAI TTS (PRIMARY)
+        // Since ElevenLabs is out of quota, we default to OpenAI 'Shimmer' for everything.
+        try {
+            // console.log("🔄 Generating audio with OpenAI...");
+            const mp3 = await openai.audio.speech.create({
+                model: "tts-1",
+                voice: "shimmer",
+                input: text,
+                speed: 1.15
+            });
+            const buffer = Buffer.from(await mp3.arrayBuffer());
+
+            this.ws.send(JSON.stringify({
+                type: 'ai_audio_chunk',
+                audio: buffer.toString('base64')
+            }));
+
+        } catch (e) {
+            console.error("❌ CRITICAL: OpenAI TTS failed.", e);
+        }
+
+        /* 
+        // 🔴 DISABLED: ElevenLabs (Quota Exceeded)
+        // Kept for reference if we re-enable later.
+        
+        let usedFallback = false;
         if (elevenlabs) {
             try {
                 const audioStream = await elevenlabs.generate({
-                    voice: "e4WGXlfMTDZZRStMylyI", 
+                    voice: "e4WGXlfMTDZZRStMylyI",
                     text: text,
-                    model_id: "eleven_turbo_v2_5", 
-                    stream: true, 
+                    model_id: "eleven_turbo_v2_5",
+                    stream: true,
                     voice_settings: { stability: 0.35, similarity_boost: 0.75 }
                 });
 
                 let chunkCount = 0;
                 for await (const chunk of audioStream) {
-                    if (this.isTerminating) break; 
+                    if (this.isTerminating) break;
                     chunkCount++;
                     const buffer = Buffer.from(chunk);
-                    this.ws.send(JSON.stringify({ 
-                        type: 'ai_audio_chunk', 
-                        audio: buffer.toString('base64') 
+                    this.ws.send(JSON.stringify({
+                        type: 'ai_audio_chunk',
+                        audio: buffer.toString('base64')
                     }));
                 }
                 console.log(`✅ ElevenLabs streaming complete. Sent ${chunkCount} chunks.`);
@@ -594,23 +658,34 @@ export class RealtimeSession {
         if (usedFallback) {
             try {
                 console.log("🔄 Generating audio with OpenAI Fallback...");
-                const mp3 = await openai.audio.speech.create({ 
-                    model: "tts-1", 
-                    voice: "alloy", 
-                    input: text 
+                const mp3 = await openai.audio.speech.create({
+                    model: "tts-1",
+                    voice: "shimmer",
+                    input: text
                 });
                 const buffer = Buffer.from(await mp3.arrayBuffer());
-                
+
                 // Send as single large chunk
-                this.ws.send(JSON.stringify({ 
-                    type: 'ai_audio_chunk', 
-                    audio: buffer.toString('base64') 
+                this.ws.send(JSON.stringify({
+                    type: 'ai_audio_chunk',
+                    audio: buffer.toString('base64')
                 }));
                 console.log(`✅ OpenAI audio sent (${buffer.length} bytes).`);
 
-            } catch (e) { 
-                console.error("❌ CRITICAL: Both ElevenLabs and OpenAI failed.", e); 
+            } catch (e) {
+                console.error("❌ CRITICAL: Both ElevenLabs and OpenAI failed.", e);
             }
         }
+        */
+    }
+
+    // --- 🎭 ACTIVE LISTENING FILLERS ---
+    private async playFiller() {
+        // 🛡️ REFINED FILLERS: Must be neutral enough to work if user asks a question.
+        // Bad: "I see", "Understood" (weird if user said "Can you repeat?")
+        // Good: "Mmhmm", "Okay", "Right"
+        const fillers = ["Mmhmm.", "Okay.", "Right."];
+        const randomFiller = fillers[Math.floor(Math.random() * fillers.length)];
+        await this.speak(randomFiller, true);
     }
 }
