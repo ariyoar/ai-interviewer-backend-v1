@@ -240,14 +240,19 @@ ${deepDiveStep}
     private triggerGreeting() {
         const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
 
-        console.log("[Realtime] Triggering Intro Greeting...");
-        this.wsOpenAI.send(JSON.stringify({
-            type: "response.create",
-            response: {
-                modalities: ["text", "audio"],
-                instructions: `Say exactly this with a friendly tone: "${greeting}"`
-            }
-        }));
+        console.log("[Realtime] Triggering Intro Greeting (with delay)...");
+
+        // 🕒 DELAY REQUIRED: Even after "session.updated", OpenAI needs a moment 
+        // to switch modalities. Without this, it returns empty responses. (Race Condition)
+        setTimeout(() => {
+            this.wsOpenAI.send(JSON.stringify({
+                type: "response.create",
+                response: {
+                    modalities: ["text", "audio"],
+                    instructions: `Say exactly this with a friendly tone: "${greeting}"`
+                }
+            }));
+        }, 500);
     }
 
     // --- COMPATIBILITY METHODS (Matches RealtimeSession interface) ---
