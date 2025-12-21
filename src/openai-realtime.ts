@@ -189,9 +189,13 @@ ${deepDiveStep}
     }
 
     private handleOpenAIEvent(event: any) {
-        // 🔍 DEBUG: Log unexpected ends
-        if (event.type === 'response.done' && !event.response?.output) {
-            console.warn("[Realtime] Warning: Response done but might be empty?", JSON.stringify(event));
+        // 🔍 DEBUG: Log expected vs unexpected ends
+        if (event.type === 'response.done') {
+            if (event.response?.status === 'failed') {
+                console.error("❌ [Realtime] Response FAILED:", JSON.stringify(event.response, null, 2));
+            } else if (!event.response?.output || event.response.output.length === 0) {
+                console.warn("⚠️ [Realtime] Response EMPTY:", JSON.stringify(event.response, null, 2));
+            }
         }
 
         switch (event.type) {
@@ -214,6 +218,11 @@ ${deepDiveStep}
                     type: "ai_audio_chunk",
                     audio: event.delta
                 }));
+                break;
+
+            case "response.content_part.added":
+                // Log content logic
+                console.log("[Realtime] Content Part Added:", event.part);
                 break;
 
             case "response.audio_transcript.delta":
@@ -244,7 +253,7 @@ ${deepDiveStep}
                 break;
 
             case "error":
-                console.error("[Realtime] OpenAI Error Event:", event.error);
+                console.error("[Realtime] OpenAI Error Event:", JSON.stringify(event.error, null, 2));
                 break;
 
             default:
@@ -256,18 +265,30 @@ ${deepDiveStep}
 
     // Moved greeting trigger to a method called AFTER session.updated
     private triggerGreeting() {
-        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
+        console.log("[Realtime] Triggering Intro Greeting (Conversation Strategy)...");
 
-        console.log("[Realtime] Triggering Intro Greeting (Atomic VAD-Free)...");
-
-        // 🕒 DELAY: Still keeping a small delay to be safe, but shorter now (250ms)
+        // 🕒 DELAY: Small delay to ensure session readiness
         setTimeout(() => {
             if (!this.isOpenAIConnected) return; // Safety check
+
+            // 1. Clear Buffer
+            this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+
+            // 2. Inject User Message (Forces AI to Reply)
+            this.wsOpenAI.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                    type: "message",
+                    role: "user",
+                    content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
+                }
+            }));
+
+            // 3. Ask for Response
             this.wsOpenAI.send(JSON.stringify({
                 type: "response.create",
                 response: {
-                    modalities: ["text", "audio"],
-                    instructions: `Say exactly this with a friendly tone: "${greeting}"`
+                    modalities: ["text", "audio"]
                 }
             }));
         }, 250);
