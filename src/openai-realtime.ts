@@ -35,6 +35,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private region: string = "USA";
     private isGreetingPhase: boolean = true;
     private startTime: number = Date.now(); // ⏱️ Start timer on instantiation
+    private timeCheckInterval: NodeJS.Timeout | null = null; // ⏱️ Interval for time checks
 
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
@@ -170,17 +171,12 @@ ${deepDiveStep}
 - Do NOT output markdown.
 `;
 
-        // --- 4. CALCULATE TIME & INJECT STATUS ---
-        const elapsedMinutes = (Date.now() - this.startTime) / 60000;
-        const remainingMinutes = Math.max(0, this.durationMinutes - elapsedMinutes);
-        const timeContext = `\n[SYSTEM STATUS: ${remainingMinutes.toFixed(1)} minutes remaining. Keep the conversation going.]`;
-
         // Configure the session
         const event = {
             type: "session.update",
             session: {
                 modalities: ["text", "audio"],
-                instructions: dynamicInstructions + timeContext,
+                instructions: dynamicInstructions, // 🛑 No more timeContext injection here
                 voice: "alloy", // Switch to 'alloy' (safest default) to rule out voice issues
                 input_audio_format: "pcm16",
                 output_audio_format: "pcm16",
@@ -286,10 +282,8 @@ ${deepDiveStep}
                 if (this.isGreetingPhase) {
                     console.log("[Realtime] Greeting finished. Enabling VAD for conversation...");
                     this.isGreetingPhase = false;
-                    this.sendSessionUpdate(true); // Enable VAD & Start Timer Context
-                } else {
-                    // ⏱️ ONGOING UPDATE: Refresh the time context for the NEXT turn
-                    this.sendSessionUpdate(true);
+                    this.sendSessionUpdate(true); // Enable VAD
+                    this.setupTimeTriggers();     // ⏱️ Start monitoring time
                 }
                 break;
 
@@ -364,8 +358,66 @@ ${deepDiveStep}
     }
 
     public close() {
+        if (this.timeCheckInterval) clearInterval(this.timeCheckInterval);
         if (this.wsOpenAI.readyState === WebSocket.OPEN) {
             this.wsOpenAI.close();
         }
+    }
+
+    // --- ⏱️ SURGICAL TIMEKEEPER LOGIC ---
+
+    private setupTimeTriggers() {
+        if (this.timeCheckInterval) clearInterval(this.timeCheckInterval);
+
+        console.log("[Realtime] Starting Active Timekeeper...");
+
+        this.timeCheckInterval = setInterval(() => {
+            const elapsedMinutes = (Date.now() - this.startTime) / 60000;
+            const remainingMinutes = Math.max(0, this.durationMinutes - elapsedMinutes);
+
+            // console.log(`[Realtime] Time Check: ${remainingMinutes.toFixed(1)} mins left.`);
+
+            // Triggers at specific thresholds (with a small buffer to avoid double triggering)
+            // e.g., if reamining is between 14.9 and 15.1... actually, simpler to strict check?
+            // Better: just trigger every minute or so? User asked for thresholds.
+            // Let's interpret "surgical" as "periodic reminder".
+
+            // Logic: Inject update every 2 minutes or at critical milestones?
+            // User Ex: "5 minutes remaining, 1 minute remaining"
+
+            // Critical Thresholds Logic (Stateful check would be better but keeping it simple)
+            const isCriticalMap = [15, 10, 5, 3, 1];
+
+            // We need to track which thresholds we've already fired. 
+            // Simplified approach: Just verify if we are CLOSE to a whole number threshold we care about.
+            const threshold = isCriticalMap.find(t => Math.abs(remainingMinutes - t) < 0.05); // +/- 3 seconds window
+
+            if (threshold) {
+                // Ensure we don't spam? (Interval is 1m, so collision unlikely if logic correct)
+                // Actually, setInterval(1 min) might drift. 
+                // Let's use a explicit "lastInjectedMinute" tracker if we wanted perfection.
+                // For now, let's inject a generic status every 2 minutes + the final minute.
+                this.injectSystemMessage(`[SYSTEM STATUS: ${Math.ceil(remainingMinutes)} minutes remaining. PACE YOURSELF.]`);
+            } else if (remainingMinutes < 1 && remainingMinutes > 0.1) {
+                // Final countdown (every 30s?)
+                this.injectSystemMessage(`[CRITICAL: LESS THAN 1 MINUTE. WRAP UP.]`);
+            }
+
+        }, 60000); // Check every minute
+    }
+
+    private injectSystemMessage(text: string) {
+        if (!this.isOpenAIConnected) return;
+
+        console.log(`[Realtime] 💉 Injecting System Message: "${text}"`);
+
+        this.wsOpenAI.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+                type: "message",
+                role: "system", // Use 'system' role
+                content: [{ type: "input_text", text: text }]
+            }
+        }));
     }
 }
