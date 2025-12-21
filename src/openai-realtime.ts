@@ -168,6 +168,9 @@ ${deepDiveStep}
                     prefix_padding_ms: 300,
                     silence_duration_ms: 500,
                 } : null,
+                input_audio_transcription: {
+                    model: "whisper-1"
+                }
             },
         };
 
@@ -187,6 +190,22 @@ ${deepDiveStep}
             type: "input_audio_buffer.append",
             audio: base64Audio
         }));
+    }
+
+    private async saveTranscript(role: 'candidate' | 'interviewer', text: string) {
+        try {
+            await prisma.transcriptEntry.create({
+                data: {
+                    sessionId: this.sessionId,
+                    role: role,
+                    text: text,
+                    // createdAt is handled by @default(now())
+                }
+            });
+            console.log(`[Realtime] Saved Transcript (${role}): "${text.slice(0, 50)}..."`);
+        } catch (err) {
+            console.error(`[Realtime] Failed to save transcript for ${role}:`, err);
+        }
     }
 
     private handleOpenAIEvent(event: any) {
@@ -251,6 +270,22 @@ ${deepDiveStep}
 
             case "error":
                 console.error("[Realtime] OpenAI Error Event:", JSON.stringify(event.error, null, 2));
+                break;
+
+            case "conversation.item.input_audio_transcription.completed":
+                // 🗣️ User Speech Transcribed (Server VAD)
+                const userText = event.transcript;
+                if (userText && userText.trim().length > 0) {
+                    this.saveTranscript('candidate', userText);
+                }
+                break;
+
+            case "response.audio_transcript.done":
+                // 🤖 AI Speech Transcribed
+                const aiText = event.transcript;
+                if (aiText && aiText.trim().length > 0) {
+                    this.saveTranscript('interviewer', aiText);
+                }
                 break;
 
             default:
