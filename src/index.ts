@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-const pdf = require('pdf-parse');
+import pdf from 'pdf-parse';
 import { generatePrimaryQuestions } from './openai';
 import { RealtimeSession } from './realtime';
 
