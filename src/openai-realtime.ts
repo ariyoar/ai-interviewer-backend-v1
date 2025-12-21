@@ -25,7 +25,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private sessionId: string;
     private isOpenAIConnected: boolean = false;
     private role: string = "Software Engineer";
-    private company: string = "Tech Corp";
+    private company: string = "our company";
     private resumeText: string = "";
     private jobDescription: string = "";
     private durationMinutes: number = 15;
