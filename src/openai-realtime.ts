@@ -196,12 +196,24 @@ ${deepDiveStep}
 
     private handleOpenAIEvent(event: any) {
         switch (event.type) {
+            case "response.created":
+                this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
+                break;
+
             case "response.audio.delta":
                 // AI is speaking audio bytes (Base64)
-                // Forward to frontend as 'audio_chunk'
+                // Forward to frontend as 'ai_audio_chunk' (PROTOCOL FIX)
                 this.wsClient.send(JSON.stringify({
-                    type: "audio_chunk",
+                    type: "ai_audio_chunk",
                     audio: event.delta
+                }));
+                break;
+
+            case "response.audio_transcript.delta":
+                // AI is generating text (for captions)
+                this.wsClient.send(JSON.stringify({
+                    type: "ai_text",
+                    text: event.delta
                 }));
                 break;
 
@@ -212,8 +224,9 @@ ${deepDiveStep}
                 this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
                 break;
 
-            case "response.audio.done":
+            case "response.done":
                 console.log("[Realtime] AI finished speaking turn.");
+                this.wsClient.send(JSON.stringify({ type: "ai_response_done" }));
                 break;
 
             case "error":
