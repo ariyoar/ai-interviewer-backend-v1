@@ -34,6 +34,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
 
     private region: string = "USA";
     private isGreetingPhase: boolean = true;
+    private startTime: number = Date.now(); // ⏱️ Start timer on instantiation
 
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
@@ -148,17 +149,38 @@ ${deepDiveStep}
 - **Time Management**: Keep the conversation moving. If time is running low, transition to the next section.
 - **Reciprocity**: If they ask "How are you?", answer politely but briefly.
 
+# TIME MANAGEMENT (CRITICAL)
+- **Desired Duration**: ${this.durationMinutes} minutes.
+- **Current Status**: [SYSTEM INJECTED TIME REMAINING]
+- **PACE YOURSELF**: You MUST occupy the full interview duration.
+- **IF AHEAD OF SCHEDULE**: Ask follow-up questions ("Can you give me an example?", "Why did you choose that approach?").
+- **DO NOT** race to the next section if there is plenty of time left.
+
+# ANTI-HALLUCINATION & VALIDATION RULES
+1. **Short Answer Handling**:
+   - If the candidate answers with 1-3 words (e.g., "Yes", "I did", "Okay"), or non-answers ("Um", "IDK"):
+   - 🚫 **DO NOT** say "Great", "Excellent", "I see", or "That makes sense." (This is hallucinating a good answer).
+   - ✅ **INSTEAD**: Ask for elaboration ("Could you tell me more about that?", "What do you mean specifically?").
+2. **Neutral Validation**:
+   - Use "Okay", "Understood", "Noted".
+   - Avoid excessive praise.
+
 # OUTPUT FORMAT
 - Speak naturally but professionally.
 - Do NOT output markdown.
 `;
+
+        // --- 4. CALCULATE TIME & INJECT STATUS ---
+        const elapsedMinutes = (Date.now() - this.startTime) / 60000;
+        const remainingMinutes = Math.max(0, this.durationMinutes - elapsedMinutes);
+        const timeContext = `\n[SYSTEM STATUS: ${remainingMinutes.toFixed(1)} minutes remaining. Keep the conversation going.]`;
 
         // Configure the session
         const event = {
             type: "session.update",
             session: {
                 modalities: ["text", "audio"],
-                instructions: dynamicInstructions,
+                instructions: dynamicInstructions + timeContext,
                 voice: "alloy", // Switch to 'alloy' (safest default) to rule out voice issues
                 input_audio_format: "pcm16",
                 output_audio_format: "pcm16",
@@ -264,7 +286,10 @@ ${deepDiveStep}
                 if (this.isGreetingPhase) {
                     console.log("[Realtime] Greeting finished. Enabling VAD for conversation...");
                     this.isGreetingPhase = false;
-                    this.sendSessionUpdate(true); // Enable VAD
+                    this.sendSessionUpdate(true); // Enable VAD & Start Timer Context
+                } else {
+                    // ⏱️ ONGOING UPDATE: Refresh the time context for the NEXT turn
+                    this.sendSessionUpdate(true);
                 }
                 break;
 
