@@ -166,21 +166,6 @@ ${deepDiveStep}
             },
         };
         this.wsOpenAI.send(JSON.stringify(event));
-
-        // 🚀 TRIGGER GREETING
-        // We force the AI to say the specific intro message
-        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
-
-        setTimeout(() => {
-            console.log("[Realtime] Triggering Intro Greeting...");
-            this.wsOpenAI.send(JSON.stringify({
-                type: "response.create",
-                response: {
-                    modalities: ["text", "audio"],
-                    instructions: `Say exactly this: "${greeting}"`
-                }
-            }));
-        }, 500); // Small delay to ensure session.update processes
     }
 
     public handleUserAudio(base64Audio: string) {
@@ -195,8 +180,19 @@ ${deepDiveStep}
     }
 
     private handleOpenAIEvent(event: any) {
+        // 🔍 DEBUG: Log unexpected ends
+        if (event.type === 'response.done' && !event.response?.output) {
+            console.warn("[Realtime] Warning: Response done but might be empty?", JSON.stringify(event));
+        }
+
         switch (event.type) {
+            case "session.updated":
+                console.log("[Realtime] Session configured successfully. Ready to start.");
+                this.triggerGreeting();
+                break;
+
             case "response.created":
+                console.log("[Realtime] Response Created:", event.response?.id);
                 this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
                 break;
 
@@ -232,7 +228,25 @@ ${deepDiveStep}
             case "error":
                 console.error("[Realtime] OpenAI Error Event:", event.error);
                 break;
+
+            default:
+                // Log unhandled events to see if we are missing something
+                // console.log(`[Realtime] Unhandled Event: ${event.type}`);
+                break;
         }
+    }
+
+    // Moved greeting trigger to a method called AFTER session.updated
+    private triggerGreeting() {
+        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
+
+        console.log("[Realtime] Triggering Intro Greeting...");
+        this.wsOpenAI.send(JSON.stringify({
+            type: "response.create",
+            response: {
+                instructions: `Say exactly this with a friendly tone: "${greeting}"`
+            }
+        }));
     }
 
     // --- COMPATIBILITY METHODS (Matches RealtimeSession interface) ---
