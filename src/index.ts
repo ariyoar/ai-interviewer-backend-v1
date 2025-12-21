@@ -117,32 +117,8 @@ app.post('/api/session', async (req, res) => {
 
         console.log(`Session created: ${session.id}`);
 
-        // 3. Generate Questions using OpenAI
-        const questions = await generatePrimaryQuestions({
-            role,
-            experience,
-            duration: durationMinutes,
-            jobDescription,
-            companyName,
-            industry,
-            region,
-            resumeText: finalResumeText
-        });
-
-        // 4. Save Questions to DB
-        if (questions.length > 0) {
-            await prisma.interviewQuestion.createMany({
-                data: questions.map((q, index) => ({
-                    sessionId: session.id,
-                    question: q,
-                    order: index + 1
-                }))
-            });
-            console.log(`✅ Saved ${questions.length} questions.`);
-        }
-
-        // 5. Return everything to frontend
-        res.json({ ...session, questions });
+        // 3. Return session to frontend (No static questions generated)
+        res.json(session);
 
     } catch (error) {
         console.error("Error creating session:", error);
