@@ -7,7 +7,7 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 // Configuration for the OpenAI Realtime API
-const OPENAI_WS_URL = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01';
+const OPENAI_WS_URL = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
 const SYSTEM_INSTRUCTION = `
 You are a professional, friendly AI interviewer. 
 Your goal is to conduct a structured yet natural interview.
