@@ -197,7 +197,9 @@ ${deepDiveStep}
         switch (event.type) {
             case "session.updated":
                 console.log("[Realtime] Session configured successfully. Ready to start.");
-                this.triggerGreeting();
+                if (this.isGreetingPhase) {
+                    this.triggerGreeting();
+                }
                 break;
 
             case "response.created":
