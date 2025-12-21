@@ -242,9 +242,10 @@ ${deepDiveStep}
 
         console.log("[Realtime] Triggering Intro Greeting (with delay)...");
 
-        // 🕒 DELAY REQUIRED: Even after "session.updated", OpenAI needs a moment 
+        // 🕒 DELAY REQUIRED: Even after "session.updated", OpenAI needs a moment
         // to switch modalities. Without this, it returns empty responses. (Race Condition)
         setTimeout(() => {
+            if (!this.isOpenAIConnected) return; // Safety check
             this.wsOpenAI.send(JSON.stringify({
                 type: "response.create",
                 response: {
