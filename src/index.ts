@@ -31,6 +31,9 @@ app.use(express.json({ limit: '50mb' }));
 // Store active voice sessions in memory
 const activeSessions = new Map<string, RealtimeSession>();
 
+// 🚀 CONCURRENCY CONTROL: Define the maximum number of active interview sessions
+const MAX_CONCURRENT_SESSIONS = 5;
+
 // --- REST API: Session Creation ---
 app.post('/api/session', async (req, res) => {
     try {
@@ -155,10 +158,24 @@ wss.on('connection', (ws: WebSocket) => {
         try {
             const data = JSON.parse(message.toString());
 
+
+
             // 1. Init Session: Connect Frontend <-> Backend <-> OpenAI
             if (data.type === 'init_session') {
+
+                // 🛑 CAPACITY CHECK
+                if (activeSessions.size >= MAX_CONCURRENT_SESSIONS) {
+                    console.warn(`🛑 Rejected session. Server at capacity (${activeSessions.size}/${MAX_CONCURRENT_SESSIONS})`);
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Server is at maximum capacity. Please try again in a moment.'
+                    }));
+                    ws.close();
+                    return;
+                }
+
                 currentSessionId = data.sessionId;
-                console.log(`Socket linked to session: ${currentSessionId}`);
+                console.log(`Socket linked to session: ${currentSessionId}. Active Sessions: ${activeSessions.size + 1}/${MAX_CONCURRENT_SESSIONS}`);
 
                 if (currentSessionId) {
                     const realtime = new RealtimeSession(ws, currentSessionId);
