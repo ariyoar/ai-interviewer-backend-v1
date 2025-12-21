@@ -188,26 +188,39 @@ ${deepDiveStep}
         }));
     }
 
+    private sendDebugLog(message: string, data?: any) {
+        if (this.wsClient.readyState === WebSocket.OPEN) {
+            this.wsClient.send(JSON.stringify({
+                type: 'debug_log',
+                message: message,
+                data: data
+            }));
+        }
+        console.log(`[Realtime Log] ${message}`, data ? JSON.stringify(data) : '');
+    }
+
     private handleOpenAIEvent(event: any) {
         // 🔍 DEBUG: Log expected vs unexpected ends
         if (event.type === 'response.done') {
             if (event.response?.status === 'failed') {
-                console.error("❌ [Realtime] Response FAILED:", JSON.stringify(event.response, null, 2));
+                this.sendDebugLog("❌ Response FAILED", event.response);
             } else if (!event.response?.output || event.response.output.length === 0) {
-                console.warn("⚠️ [Realtime] Response EMPTY:", JSON.stringify(event.response, null, 2));
+                this.sendDebugLog("⚠️ Response EMPTY", event.response);
+            } else {
+                this.sendDebugLog("✅ Response Success", { output_count: event.response.output.length });
             }
         }
 
         switch (event.type) {
             case "session.updated":
-                console.log("[Realtime] Session configured successfully. Ready to start.");
+                this.sendDebugLog("Session Configured");
                 if (this.isGreetingPhase) {
                     this.triggerGreeting();
                 }
                 break;
 
             case "response.created":
-                console.log("[Realtime] Response Created:", event.response?.id);
+                this.sendDebugLog("Response Created", { id: event.response?.id });
                 this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
                 break;
 
@@ -222,7 +235,7 @@ ${deepDiveStep}
 
             case "response.content_part.added":
                 // Log content logic
-                console.log("[Realtime] Content Part Added:", event.part);
+                this.sendDebugLog("Content Part Added", event.part);
                 break;
 
             case "response.audio_transcript.delta":
@@ -235,25 +248,25 @@ ${deepDiveStep}
 
             case "input_audio_buffer.speech_started":
                 // User started speaking while AI was talking -> Interrupt!
-                console.log("[Realtime] User interruption detected.");
+                this.sendDebugLog("User Interruption Detected");
                 this.wsClient.send(JSON.stringify({ type: "interruption" }));
                 this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
                 break;
 
             case "response.done":
-                console.log("[Realtime] AI finished speaking turn.");
+                this.sendDebugLog("AI Finished Speaking Turn");
                 this.wsClient.send(JSON.stringify({ type: "ai_response_done" }));
 
                 // 🔄 VAD TOGGLE: If this was the greeting, now we enable VAD for the interview
                 if (this.isGreetingPhase) {
-                    console.log("[Realtime] Greeting finished. Enabling VAD for conversation...");
+                    this.sendDebugLog("Greeting finished. Enabling VAD...");
                     this.isGreetingPhase = false;
                     this.sendSessionUpdate(true); // Enable VAD
                 }
                 break;
 
             case "error":
-                console.error("[Realtime] OpenAI Error Event:", JSON.stringify(event.error, null, 2));
+                this.sendDebugLog("OpenAI Error Event", event.error);
                 break;
 
             default:
@@ -265,7 +278,7 @@ ${deepDiveStep}
 
     // Moved greeting trigger to a method called AFTER session.updated
     private triggerGreeting() {
-        console.log("[Realtime] Triggering Intro Greeting (Conversation Strategy)...");
+        this.sendDebugLog("Triggering Conversation Strategy Greeting...");
 
         // 🕒 DELAY: Small delay to ensure session readiness
         setTimeout(() => {
@@ -275,16 +288,19 @@ ${deepDiveStep}
             this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
 
             // 2. Inject User Message (Forces AI to Reply)
-            this.wsOpenAI.send(JSON.stringify({
+            const userMsg = {
                 type: "conversation.item.create",
                 item: {
                     type: "message",
                     role: "user",
                     content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
                 }
-            }));
+            };
+            this.sendDebugLog("Sending User Message", userMsg);
+            this.wsOpenAI.send(JSON.stringify(userMsg));
 
             // 3. Ask for Response
+            this.sendDebugLog("Requesting Response...");
             this.wsOpenAI.send(JSON.stringify({
                 type: "response.create",
                 response: {
