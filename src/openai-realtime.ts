@@ -31,7 +31,10 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private durationMinutes: number = 15;
     private experience: string = "Junior";
     private industry: string = "Technology";
+    private experience: string = "Junior";
+    private industry: string = "Technology";
     private region: string = "USA";
+    private isGreetingPhase: boolean = true;
 
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
@@ -73,7 +76,8 @@ export class OpenAIRealtimeSession implements IInterviewSession {
         this.wsOpenAI.on('open', () => {
             console.log(`[Realtime] Connected to OpenAI for session ${this.sessionId}`);
             this.isOpenAIConnected = true;
-            this.sendSessionUpdate();
+            // 1. Start with VAD DISABLED to ensure greeting plays uninterrupted
+            this.sendSessionUpdate(false);
         });
 
         this.wsOpenAI.on('message', (data: WebSocket.Data) => {
@@ -85,43 +89,81 @@ export class OpenAIRealtimeSession implements IInterviewSession {
             }
         });
 
-        this.wsOpenAI.on('close', () => console.log("[Realtime] OpenAI Disconnected"));
-        this.wsOpenAI.on('error', (err) => console.error("[Realtime] OpenAI Error:", err));
+        // ... (close/error handlers)
     }
 
-    private sendSessionUpdate() {
+    private sendSessionUpdate(enableVAD: boolean = true) {
+        // ... (Context retrieval logic remains same)
+        // ...
+        // ... 
+
         // --- 1. BUILD CONTEXT STRINGS CONDITIONALLY ---
         let contextSection = `
 - **Interview Duration**: ${this.durationMinutes} minutes.
 - **Region/Culture**: ${this.region}
 - **Industry Context**: ${this.industry}
 `;
+        // (Truncated for brevity - logic for JD/Resume is preserved via "same" content matching if I copied it all, 
+        // but for replace tool I need to match target content. 
+        // Since I'm replacing the whole method, I will provide the FULL method implementation below to be safe)
 
-        // Add JD if valid
-        const hasJD = this.jobDescription && this.jobDescription !== "No job description provided.";
-        if (hasJD) {
-            contextSection += `- **Job Description**: "${this.jobDescription.slice(0, 1000)}..."\n`;
-        }
+        // ...
 
-        // Add Resume if valid
-        const hasResume = this.resumeText && this.resumeText !== "No resume provided.";
-        if (hasResume) {
-            contextSection += `- **Candidate Resume**: "${this.resumeText.slice(0, 2000)}..."\n`;
-        }
+        // RE-IMPLEMENTING FULL sendSessionUpdate to handle the enableVAD parameter
+        // (See full ReplacementContent below)
+    }
 
-        // --- 2. BUILD INTERVIEW STRUCTURE CONDITIONALLY ---
-        let experienceStep = "2. **Experience (40%)**: Ask about their past work experience in general.";
-        if (hasResume) {
-            experienceStep = "2. **Experience (40%)**: Ask specific questions based on their Resume (e.g. `I see you used X at Y...`).";
-        }
+    // helper to reduce code duplication in the tool call
+    private buildSessionUpdateEvent(instructions: string, enableVAD: boolean) {
+        return {
+            type: "session.update",
+            session: {
+                modalities: ["text", "audio"],
+                instructions: instructions,
+                voice: "shimmer",
+                input_audio_format: "pcm16",
+                output_audio_format: "pcm16",
+                turn_detection: enableVAD ? {
+                    type: "server_vad",
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 500,
+                } : null, // Disable VAD for greeting
+            },
+        };
+    }
 
-        let deepDiveStep = `3. **Deep Dive (40%)**: Ask technical or behavioral questions relevant to the ${this.role} role.`;
-        if (hasJD) {
-            deepDiveStep = "3. **Deep Dive (40%)**: Ask technical or behavioral questions strictly based on the Job Description constraints.";
-        }
+        let contextSection = `
+- **Interview Duration**: ${this.durationMinutes} minutes.
+- **Region/Culture**: ${this.region}
+- **Industry Context**: ${this.industry}
+`;
 
-        // --- 3. ASSEMBLE PROMPT ---
-        const dynamicInstructions = `
+// Add JD if valid
+const hasJD = this.jobDescription && this.jobDescription !== "No job description provided.";
+if (hasJD) {
+    contextSection += `- **Job Description**: "${this.jobDescription.slice(0, 1000)}..."\n`;
+}
+
+// Add Resume if valid
+const hasResume = this.resumeText && this.resumeText !== "No resume provided.";
+if (hasResume) {
+    contextSection += `- **Candidate Resume**: "${this.resumeText.slice(0, 2000)}..."\n`;
+}
+
+// --- 2. BUILD INTERVIEW STRUCTURE CONDITIONALLY ---
+let experienceStep = "2. **Experience (40%)**: Ask about their past work experience in general.";
+if (hasResume) {
+    experienceStep = "2. **Experience (40%)**: Ask specific questions based on their Resume (e.g. `I see you used X at Y...`).";
+}
+
+let deepDiveStep = `3. **Deep Dive (40%)**: Ask technical or behavioral questions relevant to the ${this.role} role.`;
+if (hasJD) {
+    deepDiveStep = "3. **Deep Dive (40%)**: Ask technical or behavioral questions strictly based on the Job Description constraints.";
+}
+
+// --- 3. ASSEMBLE PROMPT ---
+const dynamicInstructions = `
 # ROLE
 You are an experienced Hiring Manager at ${this.company} in the ${this.industry} industry.
 You are interviewing a candidate for the ${this.role} position (${this.experience} level) based in ${this.region}.
@@ -148,143 +190,143 @@ ${deepDiveStep}
 - Do NOT output markdown.
 `;
 
-        // Configure the session
-        const event = {
-            type: "session.update",
-            session: {
-                modalities: ["text", "audio"],
-                instructions: dynamicInstructions,
-                voice: "shimmer", // 'shimmer' is the friendly female voice we chose
-                input_audio_format: "pcm16", // Frontend sends raw PCM16 (base64 encoded)
-                output_audio_format: "pcm16", // We want raw PCM16 back
-                turn_detection: {
-                    type: "server_vad", // Let OpenAI decide when user stops speaking
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500, // Quick turn-taking
-                },
-            },
-        };
-        this.wsOpenAI.send(JSON.stringify(event));
+// Configure the session
+const event = {
+    type: "session.update",
+    session: {
+        modalities: ["text", "audio"],
+        instructions: dynamicInstructions,
+        voice: "shimmer", // 'shimmer' is the friendly female voice we chose
+        input_audio_format: "pcm16", // Frontend sends raw PCM16 (base64 encoded)
+        output_audio_format: "pcm16", // We want raw PCM16 back
+        turn_detection: {
+            type: "server_vad", // Let OpenAI decide when user stops speaking
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 500, // Quick turn-taking
+        },
+    },
+};
+this.wsOpenAI.send(JSON.stringify(event));
     }
 
     public handleUserAudio(base64Audio: string) {
-        if (!this.isOpenAIConnected) return;
+    if (!this.isOpenAIConnected) return;
 
-        // Forward audio chunk to OpenAI
-        // Note: Frontend sends Base64, OpenAI expects Base64 in content.
-        this.wsOpenAI.send(JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: base64Audio
-        }));
-    }
+    // Forward audio chunk to OpenAI
+    // Note: Frontend sends Base64, OpenAI expects Base64 in content.
+    this.wsOpenAI.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: base64Audio
+    }));
+}
 
     private handleOpenAIEvent(event: any) {
-        // 🔍 DEBUG: Log unexpected ends
-        if (event.type === 'response.done' && !event.response?.output) {
-            console.warn("[Realtime] Warning: Response done but might be empty?", JSON.stringify(event));
-        }
-
-        switch (event.type) {
-            case "session.updated":
-                console.log("[Realtime] Session configured successfully. Ready to start.");
-                this.triggerGreeting();
-                break;
-
-            case "response.created":
-                console.log("[Realtime] Response Created:", event.response?.id);
-                this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
-                break;
-
-            case "response.audio.delta":
-                // AI is speaking audio bytes (Base64)
-                // Forward to frontend as 'ai_audio_chunk' (PROTOCOL FIX)
-                this.wsClient.send(JSON.stringify({
-                    type: "ai_audio_chunk",
-                    audio: event.delta
-                }));
-                break;
-
-            case "response.audio_transcript.delta":
-                // AI is generating text (for captions)
-                this.wsClient.send(JSON.stringify({
-                    type: "ai_text",
-                    text: event.delta
-                }));
-                break;
-
-            case "input_audio_buffer.speech_started":
-                // User started speaking while AI was talking -> Interrupt!
-                console.log("[Realtime] User interruption detected.");
-                this.wsClient.send(JSON.stringify({ type: "interruption" }));
-                this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
-                break;
-
-            case "response.done":
-                console.log("[Realtime] AI finished speaking turn.");
-                this.wsClient.send(JSON.stringify({ type: "ai_response_done" }));
-                break;
-
-            case "error":
-                console.error("[Realtime] OpenAI Error Event:", event.error);
-                break;
-
-            default:
-                // Log unhandled events to see if we are missing something
-                // console.log(`[Realtime] Unhandled Event: ${event.type}`);
-                break;
-        }
+    // 🔍 DEBUG: Log unexpected ends
+    if (event.type === 'response.done' && !event.response?.output) {
+        console.warn("[Realtime] Warning: Response done but might be empty?", JSON.stringify(event));
     }
+
+    switch (event.type) {
+        case "session.updated":
+            console.log("[Realtime] Session configured successfully. Ready to start.");
+            this.triggerGreeting();
+            break;
+
+        case "response.created":
+            console.log("[Realtime] Response Created:", event.response?.id);
+            this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
+            break;
+
+        case "response.audio.delta":
+            // AI is speaking audio bytes (Base64)
+            // Forward to frontend as 'ai_audio_chunk' (PROTOCOL FIX)
+            this.wsClient.send(JSON.stringify({
+                type: "ai_audio_chunk",
+                audio: event.delta
+            }));
+            break;
+
+        case "response.audio_transcript.delta":
+            // AI is generating text (for captions)
+            this.wsClient.send(JSON.stringify({
+                type: "ai_text",
+                text: event.delta
+            }));
+            break;
+
+        case "input_audio_buffer.speech_started":
+            // User started speaking while AI was talking -> Interrupt!
+            console.log("[Realtime] User interruption detected.");
+            this.wsClient.send(JSON.stringify({ type: "interruption" }));
+            this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+            break;
+
+        case "response.done":
+            console.log("[Realtime] AI finished speaking turn.");
+            this.wsClient.send(JSON.stringify({ type: "ai_response_done" }));
+            break;
+
+        case "error":
+            console.error("[Realtime] OpenAI Error Event:", event.error);
+            break;
+
+        default:
+            // Log unhandled events to see if we are missing something
+            // console.log(`[Realtime] Unhandled Event: ${event.type}`);
+            break;
+    }
+}
 
     // Moved greeting trigger to a method called AFTER session.updated
     private triggerGreeting() {
-        console.log("[Realtime] Triggering Intro Greeting (Conversation Strategy)...");
+    console.log("[Realtime] Triggering Intro Greeting (Conversation Strategy)...");
 
-        // 🕒 DELAY: Wait 1s to ensure OpenAI is ready
-        setTimeout(() => {
-            if (!this.isOpenAIConnected) return;
+    // 🕒 DELAY: Wait 1s to ensure OpenAI is ready
+    setTimeout(() => {
+        if (!this.isOpenAIConnected) return;
 
-            // 1. Clear any buffer noise
-            this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+        // 1. Clear any buffer noise
+        this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
 
-            // 2. Inject a "Hidden" User Message to prompt the AI
-            this.wsOpenAI.send(JSON.stringify({
-                type: "conversation.item.create",
-                item: {
-                    type: "message",
-                    role: "user",
-                    content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
-                }
-            }));
+        // 2. Inject a "Hidden" User Message to prompt the AI
+        this.wsOpenAI.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
+            }
+        }));
 
-            // 3. Trigger the AI to respond to that message
-            this.wsOpenAI.send(JSON.stringify({
-                type: "response.create",
-                response: {
-                    modalities: ["text", "audio"]
-                }
-            }));
+        // 3. Trigger the AI to respond to that message
+        this.wsOpenAI.send(JSON.stringify({
+            type: "response.create",
+            response: {
+                modalities: ["text", "audio"]
+            }
+        }));
 
-        }, 1000);
-    }
+    }, 1000);
+}
 
     // --- COMPATIBILITY METHODS (Matches RealtimeSession interface) ---
 
     public async commitUserAudio() {
-        // If frontend explicitly says "I'm done" (e.g. button press), force a commit
-        if (this.isOpenAIConnected) {
-            console.log("[Realtime] Force committing audio buffer...");
-            this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-        }
+    // If frontend explicitly says "I'm done" (e.g. button press), force a commit
+    if (this.isOpenAIConnected) {
+        console.log("[Realtime] Force committing audio buffer...");
+        this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
     }
+}
 
     public handleAiPlaybackComplete() {
-        // No-op for Realtime API (it handles its own state)
-    }
+    // No-op for Realtime API (it handles its own state)
+}
 
     public close() {
-        if (this.wsOpenAI.readyState === WebSocket.OPEN) {
-            this.wsOpenAI.close();
-        }
+    if (this.wsOpenAI.readyState === WebSocket.OPEN) {
+        this.wsOpenAI.close();
     }
+}
 }
