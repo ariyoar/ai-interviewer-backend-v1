@@ -238,22 +238,34 @@ ${deepDiveStep}
 
     // Moved greeting trigger to a method called AFTER session.updated
     private triggerGreeting() {
-        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
+        console.log("[Realtime] Triggering Intro Greeting (Conversation Strategy)...");
 
-        console.log("[Realtime] Triggering Intro Greeting (with delay)...");
-
-        // 🕒 DELAY REQUIRED: Even after "session.updated", OpenAI needs a moment
-        // to switch modalities. Without this, it returns empty responses. (Race Condition)
+        // 🕒 DELAY: Wait 1s to ensure OpenAI is ready
         setTimeout(() => {
-            if (!this.isOpenAIConnected) return; // Safety check
+            if (!this.isOpenAIConnected) return;
+
+            // 1. Clear any buffer noise
+            this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+
+            // 2. Inject a "Hidden" User Message to prompt the AI
+            this.wsOpenAI.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                    type: "message",
+                    role: "user",
+                    content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
+                }
+            }));
+
+            // 3. Trigger the AI to respond to that message
             this.wsOpenAI.send(JSON.stringify({
                 type: "response.create",
                 response: {
-                    modalities: ["text", "audio"],
-                    instructions: `Say exactly this with a friendly tone: "${greeting}"`
+                    modalities: ["text", "audio"]
                 }
             }));
-        }, 500);
+
+        }, 1000);
     }
 
     // --- COMPATIBILITY METHODS (Matches RealtimeSession interface) ---
