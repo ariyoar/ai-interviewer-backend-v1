@@ -158,7 +158,7 @@ ${deepDiveStep}
             session: {
                 modalities: ["text", "audio"],
                 instructions: dynamicInstructions,
-                voice: "shimmer",
+                voice: "alloy", // Switch to 'alloy' (safest default) to rule out voice issues
                 input_audio_format: "pcm16",
                 output_audio_format: "pcm16",
                 turn_detection: enableVAD ? {
