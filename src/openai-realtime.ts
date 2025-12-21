@@ -21,17 +21,44 @@ import { IInterviewSession } from './types';
 
 export class OpenAIRealtimeSession implements IInterviewSession {
     private wsClient: WebSocket; // Connection to Frontend
-    private wsOpenAI: WebSocket; // Connection to OpenAI
+    private wsOpenAI!: WebSocket; // Connection to OpenAI
     private sessionId: string;
     private isOpenAIConnected: boolean = false;
+    private role: string = "Software Engineer";
+    private company: string = "Tech Corp";
+    private resumeText: string = "";
+    private jobDescription: string = "";
+    private durationMinutes: number = 15;
+    private experience: string = "Junior";
+    private industry: string = "Technology";
+    private region: string = "USA";
 
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
         this.sessionId = sessionId;
+        this.init();
+    }
 
-        console.log(`[Realtime] Initializing session: ${sessionId}`);
+    private async init() {
+        console.log(`[Realtime] Initializing session: ${this.sessionId}`);
 
-        // Initialize OpenAI WebSocket connection
+        // 1. Fetch Context from DB
+        const session = await prisma.interviewSession.findUnique({
+            where: { id: this.sessionId }
+        });
+
+        if (session) {
+            this.role = session.role;
+            this.company = session.companyName || "our company";
+            this.resumeText = session.resumeText || "No resume provided.";
+            this.jobDescription = session.jobDescription || "No job description provided.";
+            this.durationMinutes = session.durationMinutes || 15;
+            this.experience = session.experience || "Not specified";
+            this.industry = session.industry || "General Technology";
+            this.region = session.region || "Global";
+        }
+
+        // 2. Initialize OpenAI WebSocket connection
         this.wsOpenAI = new WebSocket(OPENAI_WS_URL, {
             headers: {
                 "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -63,12 +90,70 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     }
 
     private sendSessionUpdate() {
-        // Configure the session (Voice, Instructions, VAD)
+        // --- 1. BUILD CONTEXT STRINGS CONDITIONALLY ---
+        let contextSection = `
+- **Interview Duration**: ${this.durationMinutes} minutes.
+- **Region/Culture**: ${this.region}
+- **Industry Context**: ${this.industry}
+`;
+
+        // Add JD if valid
+        const hasJD = this.jobDescription && this.jobDescription !== "No job description provided.";
+        if (hasJD) {
+            contextSection += `- **Job Description**: "${this.jobDescription.slice(0, 1000)}..."\n`;
+        }
+
+        // Add Resume if valid
+        const hasResume = this.resumeText && this.resumeText !== "No resume provided.";
+        if (hasResume) {
+            contextSection += `- **Candidate Resume**: "${this.resumeText.slice(0, 2000)}..."\n`;
+        }
+
+        // --- 2. BUILD INTERVIEW STRUCTURE CONDITIONALLY ---
+        let experienceStep = "2. **Experience (40%)**: Ask about their past work experience in general.";
+        if (hasResume) {
+            experienceStep = "2. **Experience (40%)**: Ask specific questions based on their Resume (e.g. `I see you used X at Y...`).";
+        }
+
+        let deepDiveStep = `3. **Deep Dive (40%)**: Ask technical or behavioral questions relevant to the ${this.role} role.`;
+        if (hasJD) {
+            deepDiveStep = "3. **Deep Dive (40%)**: Ask technical or behavioral questions strictly based on the Job Description constraints.";
+        }
+
+        // --- 3. ASSEMBLE PROMPT ---
+        const dynamicInstructions = `
+# ROLE
+You are an experienced Hiring Manager at ${this.company} in the ${this.industry} industry.
+You are interviewing a candidate for the ${this.role} position (${this.experience} level) based in ${this.region}.
+Your goal is to assess if the candidate is a good fit while providing a professional, engaging candidate experience.
+
+# CONTEXT
+${contextSection}
+
+# INTERVIEW STRUCTURE
+1. **Intro (1 min)**: Briefly welcome them and ask a casual icebreaker.
+${experienceStep}
+${deepDiveStep}
+4. **Q&A (Remaining)**: Ask if they have questions for you. Answer them based on the company context.
+5. **Closing**: Thank them and end the call.
+
+# GUIDELINES
+- **Time Management**: Keep track of the conversation flow. If you feel the time limit approaching, gently steer towards the Q&A section. "We have a few minutes left..."
+- **Be Conversational**: Do NOT read a list of questions. React to what they say. Say "That's interesting" or "I see."
+- **Reciprocity**: If they ask "How are you?", answer politely before moving on.
+- **Short Answers**: Keep your responses concise (under 2 sentences usually) to let the candidate speak more.
+
+# OUTPUT FORMAT
+- Speak naturally. Use pauses (...) if you are thinking. 
+- Do NOT output markdown.
+`;
+
+        // Configure the session
         const event = {
             type: "session.update",
             session: {
                 modalities: ["text", "audio"],
-                instructions: SYSTEM_INSTRUCTION,
+                instructions: dynamicInstructions,
                 voice: "shimmer", // 'shimmer' is the friendly female voice we chose
                 input_audio_format: "pcm16", // Frontend sends raw PCM16 (base64 encoded)
                 output_audio_format: "pcm16", // We want raw PCM16 back
@@ -81,6 +166,21 @@ export class OpenAIRealtimeSession implements IInterviewSession {
             },
         };
         this.wsOpenAI.send(JSON.stringify(event));
+
+        // 🚀 TRIGGER GREETING
+        // We force the AI to say the specific intro message
+        const greeting = `Hi there! Thanks for joining. I'm the Hiring Manager for the ${this.role} role at ${this.company}. How are you doing today?`;
+
+        setTimeout(() => {
+            console.log("[Realtime] Triggering Intro Greeting...");
+            this.wsOpenAI.send(JSON.stringify({
+                type: "response.create",
+                response: {
+                    modalities: ["text", "audio"],
+                    instructions: `Say exactly this: "${greeting}"`
+                }
+            }));
+        }, 500); // Small delay to ensure session.update processes
     }
 
     public handleUserAudio(base64Audio: string) {
