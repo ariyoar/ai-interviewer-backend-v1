@@ -244,6 +244,7 @@ ${deepDiveStep}
         this.wsOpenAI.send(JSON.stringify({
             type: "response.create",
             response: {
+                modalities: ["text", "audio"],
                 instructions: `Say exactly this with a friendly tone: "${greeting}"`
             }
         }));
