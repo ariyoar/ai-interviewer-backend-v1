@@ -23,7 +23,9 @@ if (process.env.ELEVENLABS_API_KEY) {
 
 type SessionState = 'INTRO' | 'SMALL_TALK' | 'INTERVIEW' | 'Q_AND_A' | 'CLOSING';
 
-export class RealtimeSession {
+import { IInterviewSession } from './types';
+
+export class RealtimeSession implements IInterviewSession {
     private ws: WebSocket;
     private sessionId: string;
     private state: SessionState = 'INTRO';

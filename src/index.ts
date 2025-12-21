@@ -8,6 +8,9 @@ import { PrismaClient } from '@prisma/client';
 import pdf from 'pdf-parse';
 import { generatePrimaryQuestions } from './openai';
 import { RealtimeSession } from './realtime';
+import { OpenAIRealtimeSession } from './openai-realtime';
+
+import { IInterviewSession } from './types';
 
 // Load environment variables
 dotenv.config();
@@ -29,7 +32,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 
 // Store active voice sessions in memory
-const activeSessions = new Map<string, RealtimeSession>();
+const activeSessions = new Map<string, IInterviewSession>();
 
 // 🚀 CONCURRENCY CONTROL: Define the maximum number of active interview sessions
 const MAX_CONCURRENT_SESSIONS = 5;
@@ -158,8 +161,6 @@ wss.on('connection', (ws: WebSocket) => {
         try {
             const data = JSON.parse(message.toString());
 
-
-
             // 1. Init Session: Connect Frontend <-> Backend <-> OpenAI
             if (data.type === 'init_session') {
 
@@ -178,8 +179,16 @@ wss.on('connection', (ws: WebSocket) => {
                 console.log(`Socket linked to session: ${currentSessionId}. Active Sessions: ${activeSessions.size + 1}/${MAX_CONCURRENT_SESSIONS}`);
 
                 if (currentSessionId) {
-                    const realtime = new RealtimeSession(ws, currentSessionId);
-                    activeSessions.set(currentSessionId, realtime);
+                    // 🔀 FEATURE FLAG: Check if we should use the new Realtime API
+                    if (data.useRealtimeApi) {
+                        console.log("✨ Using OpenAI Realtime API (Hybrid Mode) ✨");
+                        const realtime = new OpenAIRealtimeSession(ws, currentSessionId);
+                        activeSessions.set(currentSessionId, realtime);
+                    } else {
+                        // Legacy/Standard Mode
+                        const realtime = new RealtimeSession(ws, currentSessionId);
+                        activeSessions.set(currentSessionId, realtime);
+                    }
                 }
             }
 
