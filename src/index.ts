@@ -6,8 +6,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import pdf from 'pdf-parse';
-import { generatePrimaryQuestions } from './openai';
-import { RealtimeSession } from './realtime';
 import { OpenAIRealtimeSession } from './openai-realtime';
 
 import { IInterviewSession } from './types';
@@ -155,16 +153,9 @@ wss.on('connection', (ws: WebSocket) => {
                 console.log(`Socket linked to session: ${currentSessionId}. Active Sessions: ${activeSessions.size + 1}/${MAX_CONCURRENT_SESSIONS}`);
 
                 if (currentSessionId) {
-                    // 🔀 FEATURE FLAG: Check if we should use the new Realtime API
-                    if (data.useRealtimeApi) {
-                        console.log("✨ Using OpenAI Realtime API (Hybrid Mode) ✨");
-                        const realtime = new OpenAIRealtimeSession(ws, currentSessionId);
-                        activeSessions.set(currentSessionId, realtime);
-                    } else {
-                        // Legacy/Standard Mode
-                        const realtime = new RealtimeSession(ws, currentSessionId);
-                        activeSessions.set(currentSessionId, realtime);
-                    }
+                    console.log("✨ Initializing OpenAI Realtime Session ✨");
+                    const realtime = new OpenAIRealtimeSession(ws, currentSessionId);
+                    activeSessions.set(currentSessionId, realtime);
                 }
             }
 

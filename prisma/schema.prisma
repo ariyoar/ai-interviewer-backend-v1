@@ -29,20 +29,10 @@ model InterviewSession {
   startedAt       DateTime?
   endedAt         DateTime?
 
-  questions       InterviewQuestion[]
   transcript      TranscriptEntry[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-}
-
-model InterviewQuestion {
-  id        String @id @default(cuid())
-  sessionId String
-  order     Int
-  question  String
-
-  session   InterviewSession @relation(fields: [sessionId], references: [id])
 }
 
 model TranscriptEntry {
