@@ -37,6 +37,11 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private startTime: number = Date.now(); // ⏱️ Start timer on instantiation
     private timeCheckInterval: NodeJS.Timeout | null = null; // ⏱️ Interval for time checks
 
+    // 🧠 SMART BARGE-IN STATE
+    private isAiSpeaking: boolean = false;
+    private isInterruptionContext: boolean = false; // 🔒 Only filter short inputs if it was an interruption
+    private potentialBackchannelId: string | null = null;
+
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
         this.sessionId = sessionId;
@@ -240,8 +245,19 @@ ${deepDiveStep}
                 }
                 break;
 
+            case "response.output_item.added":
+                // 🧠 SMART BARGE-IN: If we flagged a backchannel, CANCEL the response immediately.
+                // This event fires when AI creates a new item to respond.
+                if (this.potentialBackchannelId) {
+                    console.log(`[Realtime] 🚫 Cancelling response to backchannel.`);
+                    this.wsOpenAI.send(JSON.stringify({ type: "response.cancel" }));
+                    this.potentialBackchannelId = null; // Reset
+                }
+                break;
+
             case "response.created":
                 console.log("[Realtime] Response Created:", event.response?.id);
+                this.isAiSpeaking = true; // 🗣️ AI started a turn
                 this.wsClient.send(JSON.stringify({ type: "ai_response_start" }));
                 break;
 
@@ -271,11 +287,22 @@ ${deepDiveStep}
                 // User started speaking while AI was talking -> Interrupt!
                 console.log("[Realtime] User interruption detected.");
                 this.wsClient.send(JSON.stringify({ type: "interruption" }));
-                this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+
+                // 🧠 Capture Interruption Context
+                // If AI was speaking, this counts as a Barge-In scenario.
+                if (this.isAiSpeaking) {
+                    this.isInterruptionContext = true;
+                    console.log("[Realtime] Barging in on AI speech.");
+                } else {
+                    this.isInterruptionContext = false;
+                }
+
+                // 🛑 REMOVED MANUAL CLEAR per Smart Barge-In Logic
                 break;
 
             case "response.done":
                 console.log("[Realtime] AI finished speaking turn.");
+                this.isAiSpeaking = false; // 🤫 AI finished
                 this.wsClient.send(JSON.stringify({ type: "ai_response_done" }));
 
                 // 🔄 VAD TOGGLE: If this was the greeting, now we enable VAD for the interview
@@ -292,8 +319,33 @@ ${deepDiveStep}
                 break;
 
             case "conversation.item.input_audio_transcription.completed":
-                // 🗣️ User Speech Transcribed (Server VAD)
-                const userText = event.transcript;
+                // 🗣️ User Speech Transcribed
+                const userText = event.transcript || "";
+                const wordCount = userText.trim().split(/\s+/).length;
+
+                // 🧠 SMART BARGE-IN FILTER
+                // Refined Logic based on User Request: "IF (User_Input_Word_Count < 3) THEN Discard"
+                // ONLY if this was an interruption context.
+                if (this.isInterruptionContext && wordCount < 3 && userText.trim().length > 0) {
+                    console.log(`[Realtime] 🧹 Smart Barge-In: Detected backchannel ("${userText}"). Discarding.`);
+
+                    // 1. Delete the item from context so AI doesn't see it
+                    this.wsOpenAI.send(JSON.stringify({
+                        type: "conversation.item.delete",
+                        item_id: event.item_id
+                    }));
+
+                    // 2. Track this ID to cancel any response it triggered
+                    this.potentialBackchannelId = event.item_id;
+
+                    // 3. DO NOT SAVE to DB
+                    this.isInterruptionContext = false; // Reset
+                    return;
+                }
+
+                this.isInterruptionContext = false; // Reset context
+                this.potentialBackchannelId = null; // Clear flag if it was a real turn
+
                 if (userText && userText.trim().length > 0) {
                     this.saveTranscript('candidate', userText);
                 }
