@@ -89,61 +89,99 @@ wss.on('connection', async (ws: WebSocket, req) => {
     const urlParams = new URLSearchParams(req.url?.split('?')[1]);
     const sessionId = urlParams.get('sessionId');
 
-    if (!sessionId) {
-        console.log("❌ Connection rejected: No sessionId");
-        ws.close(1008, "Missing sessionId");
-        return;
-    }
-
     // 1. LIMIT CHECK
     if (activeSessions.size >= MAX_CONCURRENT_SESSIONS) {
-        console.warn(`⚠️ Server Full (${activeSessions.size} active). Rejecting ${sessionId}.`);
+        console.warn(`⚠️ Server Full (${activeSessions.size} active). Rejecting connection.`);
         ws.send(JSON.stringify({ type: 'error', message: 'Server is at max capacity. Please try again later.' }));
         ws.close(1013, "Server Full");
         return;
     }
 
-    console.log(`🔌 Client connected: ${sessionId}`);
+    // --- HYBRID HANDSHAKE HANDLER ---
+    // Supports both ?sessionId=XYZ (new) and {"type": "init_session"} (legacy)
 
-    try {
-        // 2. FETCH SESSION DATA
-        const session = await prisma.interviewSession.findUnique({ where: { id: sessionId } });
-        if (!session) {
-            ws.close(1008, "Session not found");
-            return;
+    let currentSessionId: string | null = sessionId;
+    let realtimeSession: OpenAIRealtimeSession | null = null;
+
+    const initializeSession = async (sid: string) => {
+        if (!sid) return;
+        currentSessionId = sid;
+        console.log(`🔌 Client connected: ${sid}`);
+
+        try {
+            // Fetch Session
+            const session = await prisma.interviewSession.findUnique({ where: { id: sid } });
+            if (!session) {
+                console.error(`❌ Session ${sid} not found in DB`);
+                ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+                ws.close(1008, "Session not found");
+                return;
+            }
+
+            // Init Realtime Session
+            realtimeSession = new OpenAIRealtimeSession(ws, sid);
+            realtimeSession.setContext({
+                role: session.role,
+                experience: session.experience,
+                jobDescription: session.jobDescription || "",
+                resumeText: session.resumeText || "",
+                durationMinutes: session.durationMinutes,
+                industry: session.industry || "Tech",
+                region: session.region || "USA"
+            });
+
+            activeSessions.set(sid, realtimeSession);
+            await realtimeSession.connect();
+
+        } catch (err) {
+            console.error("❌ WS Init Error:", err);
+            ws.close(1011, "Internal Error");
         }
+    };
 
-        // 3. INITIALIZE REALTIME SESSION
-        const realtimeSession = new OpenAIRealtimeSession(ws, sessionId);
-
-        // Inject Context
-        realtimeSession.setContext({
-            role: session.role,
-            experience: session.experience,
-            jobDescription: session.jobDescription || "",
-            resumeText: session.resumeText || "",
-            durationMinutes: session.durationMinutes,
-            industry: session.industry || "Tech",
-            region: session.region || "USA"
-        });
-
-        // Store
-        activeSessions.set(sessionId, realtimeSession);
-
-        // Connect to OpenAI
-        await realtimeSession.connect();
-
-        // Cleanup on disconnect
-        ws.on('close', () => {
-            console.log(`🔌 Client disconnected: ${sessionId}`);
-            realtimeSession.close();
-            activeSessions.delete(sessionId);
-        });
-
-    } catch (err) {
-        console.error("❌ WS Init Error:", err);
-        ws.close(1011, "Internal Error");
+    // If sessionId provided in URL, init immediately
+    if (currentSessionId) {
+        initializeSession(currentSessionId);
     }
+
+    // Listen for messages (Handle "init_session" fallback + normal Events)
+    ws.on('message', async (message: string) => {
+        try {
+            const data = JSON.parse(message.toString());
+
+            // 1. Legacy Handshake: init_session
+            if (!currentSessionId && data.type === 'init_session') {
+                console.log(`handshake: received init_session for ${data.sessionId}`);
+                await initializeSession(data.sessionId);
+                return;
+            }
+
+            // 2. Normal Events (only if session initialized)
+            if (activeSessions.has(currentSessionId!) && realtimeSession) {
+                if (data.type === 'audio_chunk' || data.type === 'input_audio_buffer.append') {
+                    realtimeSession.handleUserAudio(data.audio);
+                }
+                else if (data.type === 'user_speaking_end' || data.type === 'input_audio_buffer.commit') {
+                    await realtimeSession.commitUserAudio();
+                }
+                else if (data.type === 'ai_playback_complete') {
+                    realtimeSession.handleAiPlaybackComplete();
+                }
+            }
+
+        } catch (err) {
+            console.error("WebSocket Message Error:", err);
+        }
+    });
+
+    // Cleanup on disconnect
+    ws.on('close', () => {
+        if (currentSessionId && activeSessions.has(currentSessionId)) {
+            console.log(`🔌 Client disconnected: ${currentSessionId}`);
+            activeSessions.get(currentSessionId)?.close();
+            activeSessions.delete(currentSessionId);
+        }
+    });
 });
 
 // START SERVER
