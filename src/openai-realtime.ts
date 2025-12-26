@@ -200,9 +200,9 @@ ${deepDiveStep}
                 output_audio_format: "pcm16",
                 turn_detection: enableVAD ? {
                     type: "server_vad",
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500,
+                    threshold: 0.6, // Increased sensitivity threshold (was 0.5) to reduce false positives
+                    prefix_padding_ms: 500, // Increased buffer (was 300)
+                    silence_duration_ms: 1000, // WAIT 1 SECOND of silence before replying (was 500)
                 } : null,
                 input_audio_transcription: {
                     model: "whisper-1"
