@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, AssessmentType } from '@prisma/client';
 import multer from 'multer';
 import pdf from 'pdf-parse';
 import { OpenAIRealtimeSession } from './openai-realtime';
@@ -68,7 +68,7 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
                 resumeText: resumeText,
                 resumeFile: resumeBase64,
                 // New Fields
-                type: type || 'PRACTICE',
+                type: (type as AssessmentType) || AssessmentType.PRACTICE,
                 rubric: rubric || ""
             }
         });
