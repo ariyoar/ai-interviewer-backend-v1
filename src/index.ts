@@ -1,201 +1,152 @@
 // src/index.ts
 import express from 'express';
-import http from 'http';
+import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
 import pdf from 'pdf-parse';
 import { OpenAIRealtimeSession } from './openai-realtime';
-
+import assessmentRoutes from './routes/assessments';
 import { IInterviewSession } from './types';
 
-// Load environment variables
 dotenv.config();
 
 // 1. INITIALIZE APP FIRST
 const app = express();
 const prisma = new PrismaClient();
-const server = http.createServer(app);
+const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 // 2. CONFIGURE MIDDLEWARE
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type']
-}));
+app.use(cors());
+app.use(express.json());
 
-// Use a higher limit (50mb) to handle large PDF Base64 strings
-app.use(express.json({ limit: '50mb' }));
+// 3. REGISTER ROUTES
+app.use('/api/assessments', assessmentRoutes);
 
-// Store active voice sessions in memory
-const activeSessions = new Map<string, IInterviewSession>();
+// Health Check
+app.get('/health', (req, res) => {
+    res.send('AI Interviewer Backend is running (Realtime API)');
+});
 
-// 🚀 CONCURRENCY CONTROL: Define the maximum number of active interview sessions
-const MAX_CONCURRENT_SESSIONS = 5;
+// Configure Multer for memory storage
+const upload = multer({ storage: multer.memoryStorage() });
 
-// --- REST API: Session Creation ---
-app.post('/api/session', async (req, res) => {
+// --- API: CREATE SESSION ---
+app.post('/api/session', upload.single('resume'), async (req: any, res: any) => {
     try {
-        const {
-            role,
-            experience,
-            durationMinutes,
-            companyName,
-            jobDescription,
-            industry,
-            region,
-            resumeText,
-            resumeFile
-        } = req.body;
+        const { role, experience, description, duration, companyName, industry, region, type, rubric } = req.body;
 
-        console.log("📝 Received Session Request...");
+        console.log(`[API] Creating Session: ${role} (${experience})`);
 
-        // --- 🔍 ROBUST PDF PARSING LOGIC ---
-        let finalResumeText = "";
+        let resumeText = "";
+        let resumeBase64 = "";
 
-        if (resumeFile) {
-            console.log("📂 PDF File detected. Extracting text...");
+        // Handle PDF Resume
+        if (req.file) {
             try {
-                // 1. Sanitize Base64 (remove data URI scheme if present)
-                const base64Clean = resumeFile.replace(/^data:.*,/, '');
-                console.log(`PO: Base64 Header (Raw): ${resumeFile.slice(0, 30)}...`);
-                console.log(`PO: Base64 Cleaned? ${resumeFile !== base64Clean}`);
-
-                const buffer = Buffer.from(base64Clean, 'base64');
-                console.log(`PO: Buffer created. Size: ${buffer.length} bytes.`);
-
-                const pdfData = await pdf(buffer);
-                console.log(`PO: PDF Parse complete. NumPages: ${pdfData.numpages}, Info:`, pdfData.info);
-
-                finalResumeText = pdfData.text.replace(/\n\s*\n/g, '\n').trim();
-                console.log(`✅ PDF Extracted! Length: ${finalResumeText.length} chars`);
-                if (finalResumeText.length < 100) {
-                    console.warn("⚠️ WARNING: Extracted text is suspiciously short:", finalResumeText);
-                } else {
-                    console.log("📄 Snippet:", finalResumeText.slice(0, 100));
-                }
+                const pdfData = await pdf(req.file.buffer);
+                resumeText = pdfData.text.slice(0, 3000); // Limit context
+                resumeBase64 = req.file.buffer.toString('base64');
+                console.log("✅ Resume extracted & encoded.");
             } catch (err) {
-                console.error("❌ PDF Parse failed:", err);
+                console.error("❌ PDF Error:", err);
             }
         }
 
-        if (!finalResumeText && resumeText) {
-            const cleanChars = resumeText.replace(/[^a-zA-Z0-9\s]/g, '').length;
-            const validRatio = cleanChars / resumeText.length;
-
-            if (validRatio > 0.4) {
-                finalResumeText = resumeText;
-                console.log("Using provided resumeText (seems valid).");
-            } else {
-                console.warn("⚠️ Ignoring corrupt/garbage frontend resume text.");
-            }
-        }
-
-        if (!finalResumeText) {
-            console.log("⚠️ No valid resume text found. Using placeholder.");
-            finalResumeText = "Candidate summary not available.";
-        }
-
-        // 2. Create the session in DB
         const session = await prisma.interviewSession.create({
             data: {
-                role,
-                experience,
-                durationMinutes,
-                companyName,
-                region,
-                industry,
-                jobDescription,
-                resumeText: finalResumeText,
-                resumeFile: resumeFile ? "saved_as_base64" : null
+                role: role || "Software Engineer",
+                experience: experience || "Junior",
+                jobDescription: description || "",
+                durationMinutes: parseInt(duration) || 15,
+                companyName: companyName || "",
+                industry: industry || "Tech",
+                region: region || "USA",
+                resumeText: resumeText,
+                resumeFile: resumeBase64,
+                // New Fields
+                type: type || 'PRACTICE',
+                rubric: rubric || ""
             }
         });
 
-        console.log(`Session created: ${session.id}`);
-
-        // 3. Return session to frontend (No static questions generated)
         res.json(session);
 
     } catch (error) {
-        console.error("Error creating session:", error);
+        console.error("Session Create Error:", error);
         res.status(500).json({ error: "Failed to create session" });
     }
 });
 
-// --- WEBSOCKET: Real-time Audio/Text ---
-wss.on('connection', (ws: WebSocket) => {
-    console.log('New client connected');
+// --- WEBSOCKET HANDLING ---
+const activeSessions: Map<string, OpenAIRealtimeSession> = new Map();
+const MAX_CONCURRENT_SESSIONS = 10;
 
-    // Track the session ID for this specific socket connection
-    let currentSessionId: string | null = null;
+wss.on('connection', async (ws: WebSocket, req) => {
+    const urlParams = new URLSearchParams(req.url?.split('?')[1]);
+    const sessionId = urlParams.get('sessionId');
 
-    ws.on('message', async (message: string) => {
-        try {
-            const data = JSON.parse(message.toString());
+    if (!sessionId) {
+        console.log("❌ Connection rejected: No sessionId");
+        ws.close(1008, "Missing sessionId");
+        return;
+    }
 
-            // 1. Init Session: Connect Frontend <-> Backend <-> OpenAI
-            if (data.type === 'init_session') {
+    // 1. LIMIT CHECK
+    if (activeSessions.size >= MAX_CONCURRENT_SESSIONS) {
+        console.warn(`⚠️ Server Full (${activeSessions.size} active). Rejecting ${sessionId}.`);
+        ws.send(JSON.stringify({ type: 'error', message: 'Server is at max capacity. Please try again later.' }));
+        ws.close(1013, "Server Full");
+        return;
+    }
 
-                // 🛑 CAPACITY CHECK
-                if (activeSessions.size >= MAX_CONCURRENT_SESSIONS) {
-                    console.warn(`🛑 Rejected session. Server at capacity (${activeSessions.size}/${MAX_CONCURRENT_SESSIONS})`);
-                    ws.send(JSON.stringify({
-                        type: 'error',
-                        message: 'Server is at maximum capacity. Please try again in a moment.'
-                    }));
-                    ws.close();
-                    return;
-                }
+    console.log(`🔌 Client connected: ${sessionId}`);
 
-                currentSessionId = data.sessionId;
-                console.log(`Socket linked to session: ${currentSessionId}. Active Sessions: ${activeSessions.size + 1}/${MAX_CONCURRENT_SESSIONS}`);
-
-                if (currentSessionId) {
-                    console.log("✨ Initializing OpenAI Realtime Session ✨");
-                    const realtime = new OpenAIRealtimeSession(ws, currentSessionId);
-                    activeSessions.set(currentSessionId, realtime);
-                }
-            }
-
-            // Get the active session object
-            const session = currentSessionId ? activeSessions.get(currentSessionId) : null;
-
-            if (session) {
-                // 2. Handle Audio Stream
-                if (data.type === 'audio_chunk' || data.type === 'input_audio_buffer.append') {
-                    session.handleUserAudio(data.audio);
-                }
-
-                // 3. User Stopped Speaking
-                else if (data.type === 'user_speaking_end' || data.type === 'input_audio_buffer.commit') {
-                    console.log('User finished speaking. Committing audio...');
-                    await session.commitUserAudio();
-                }
-
-                // 4. 🚨 NEW: Handle Playback Complete Signal (Triggers Silence Timer)
-                else if (data.type === 'ai_playback_complete') {
-                    console.log("📨 Received playback complete signal from frontend");
-                    session.handleAiPlaybackComplete();
-                }
-            }
-
-        } catch (err) {
-            console.error("WebSocket error:", err);
+    try {
+        // 2. FETCH SESSION DATA
+        const session = await prisma.interviewSession.findUnique({ where: { id: sessionId } });
+        if (!session) {
+            ws.close(1008, "Session not found");
+            return;
         }
-    });
 
-    // Cleanup on disconnect
-    ws.on('close', () => {
-        if (currentSessionId) {
-            activeSessions.delete(currentSessionId);
-            console.log(`Session ${currentSessionId} disconnected`);
-        }
-    });
+        // 3. INITIALIZE REALTIME SESSION
+        const realtimeSession = new OpenAIRealtimeSession(ws, sessionId);
+
+        // Inject Context
+        realtimeSession.setContext({
+            role: session.role,
+            experience: session.experience,
+            jobDescription: session.jobDescription || "",
+            resumeText: session.resumeText || "",
+            durationMinutes: session.durationMinutes,
+            industry: session.industry || "Tech",
+            region: session.region || "USA"
+        });
+
+        // Store
+        activeSessions.set(sessionId, realtimeSession);
+
+        // Connect to OpenAI
+        await realtimeSession.connect();
+
+        // Cleanup on disconnect
+        ws.on('close', () => {
+            console.log(`🔌 Client disconnected: ${sessionId}`);
+            realtimeSession.close();
+            activeSessions.delete(sessionId);
+        });
+
+    } catch (err) {
+        console.error("❌ WS Init Error:", err);
+        ws.close(1011, "Internal Error");
+    }
 });
 
-// Start Server
+// START SERVER
 const PORT = process.env.PORT || 8080;
 server.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`✅ Server running on port ${PORT}`);

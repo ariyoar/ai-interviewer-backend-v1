@@ -24,6 +24,9 @@ model InterviewSession {
   resumeFile      String?  @db.Text  // The actual PDF file (Base64 encoded)
   // ------------------
 
+  type            AssessmentType @default(PRACTICE)
+  rubric          String?        @db.Text // For SCREENING mode
+
   status          String   @default("ready") // "ready", "active", "completed"
 
   startedAt       DateTime?
@@ -33,6 +36,11 @@ model InterviewSession {
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+enum AssessmentType {
+  PRACTICE
+  SCREENING
 }
 
 model TranscriptEntry {

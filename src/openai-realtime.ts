@@ -45,26 +45,39 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     constructor(wsClient: WebSocket, sessionId: string) {
         this.wsClient = wsClient;
         this.sessionId = sessionId;
-        this.init();
+        // 🛑 REMOVED auto-init. logic moved to connect()
     }
 
-    private async init() {
-        console.log(`[Realtime] Initializing session: ${this.sessionId}`);
+    public setContext(context: any) {
+        if (context.role) this.role = context.role;
+        if (context.experience) this.experience = context.experience;
+        if (context.jobDescription) this.jobDescription = context.jobDescription;
+        if (context.resumeText) this.resumeText = context.resumeText;
+        if (context.durationMinutes) this.durationMinutes = context.durationMinutes;
+        if (context.industry) this.industry = context.industry;
+        if (context.region) this.region = context.region;
+        console.log(`[Realtime] Context injected manually for session ${this.sessionId}`);
+    }
 
-        // 1. Fetch Context from DB
-        const session = await prisma.interviewSession.findUnique({
-            where: { id: this.sessionId }
-        });
+    public async connect() {
+        console.log(`[Realtime] Connecting session: ${this.sessionId}`);
 
-        if (session) {
-            this.role = session.role;
-            this.company = session.companyName || "our company";
-            this.resumeText = session.resumeText || "No resume provided.";
-            this.jobDescription = session.jobDescription || "No job description provided.";
-            this.durationMinutes = session.durationMinutes || 15;
-            this.experience = session.experience || "Not specified";
-            this.industry = session.industry || "General Technology";
-            this.region = session.region || "Global";
+        // 1. If context is missing, try fetching from DB (Fallback)
+        if (!this.jobDescription && !this.resumeText) {
+            const session = await prisma.interviewSession.findUnique({
+                where: { id: this.sessionId }
+            });
+            if (session) {
+                this.role = session.role;
+                this.company = session.companyName || "our company";
+                this.resumeText = session.resumeText || "No resume provided.";
+                this.jobDescription = session.jobDescription || "No job description provided.";
+                this.durationMinutes = session.durationMinutes || 15;
+                this.experience = session.experience || "Not specified";
+                this.industry = session.industry || "General Technology";
+                this.region = session.region || "Global";
+                console.log("[Realtime] Context fetched from DB.");
+            }
         }
 
         // 2. Initialize OpenAI WebSocket connection
