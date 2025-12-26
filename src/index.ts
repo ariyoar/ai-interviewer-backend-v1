@@ -21,7 +21,8 @@ const wss = new WebSocketServer({ server });
 
 // 2. CONFIGURE MIDDLEWARE
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Increased limit for Base64 resumes
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 3. REGISTER ROUTES
 app.use('/api/assessments', assessmentRoutes);
