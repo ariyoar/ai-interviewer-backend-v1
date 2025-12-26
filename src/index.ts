@@ -38,7 +38,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 // --- API: CREATE SESSION ---
 app.post('/api/session', upload.single('resume'), async (req: any, res: any) => {
     try {
-        const { role, experience, description, duration, companyName, industry, region, type, rubric } = req.body;
+        const { role, experience, jobDescription, description, duration, companyName, industry, region, type, rubric } = req.body;
+
+        // Handle both keys for backward compatibility
+        const finalJobDescription = jobDescription || description || "";
 
         console.log(`[API] Creating Session: ${role} (${experience})`);
 
@@ -61,7 +64,7 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
             data: {
                 role: role || "Software Engineer",
                 experience: experience || "Junior",
-                jobDescription: description || "",
+                jobDescription: finalJobDescription,
                 durationMinutes: parseInt(duration) || 15,
                 companyName: companyName || "",
                 industry: industry || "Tech",
