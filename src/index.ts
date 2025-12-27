@@ -79,9 +79,13 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
 
         res.json(session);
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Session Create Error:", error);
-        res.status(500).json({ error: "Failed to create session" });
+        res.status(500).json({
+            error: "Failed to create session",
+            details: error.message,
+            stack: process.env.NODE_ENV === 'production' ? undefined : error.stack
+        });
     }
 });
 
