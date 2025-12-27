@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "echo 'Skipping build for direct TS execution'",
-    "start": "npx ts-node src/index.ts",
+    "start": "npx prisma db push && npx ts-node src/index.ts",
     "test-client": "ts-node src/test-client.ts",
     "postinstall": "prisma generate"
   },
