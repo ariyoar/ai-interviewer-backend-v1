@@ -52,7 +52,8 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
         if (req.file) {
             try {
                 const pdfData = await pdf(req.file.buffer);
-                resumeText = pdfData.text.slice(0, 3000); // Limit context
+                // Sanitize: Postgres does not allow null bytes (0x00) in text fields
+                resumeText = pdfData.text.replace(/\x00/g, '').slice(0, 3000);
                 resumeBase64 = req.file.buffer.toString('base64');
                 console.log("✅ Resume extracted & encoded.");
             } catch (err) {
