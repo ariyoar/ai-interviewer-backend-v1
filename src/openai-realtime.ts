@@ -229,9 +229,9 @@ ${deepDiveStep}
                 output_audio_format: "pcm16",
                 turn_detection: enableVAD ? {
                     type: "server_vad",
-                    threshold: 0.6, // Increased sensitivity threshold (was 0.5) to reduce false positives
-                    prefix_padding_ms: 500, // Increased buffer (was 300)
-                    silence_duration_ms: 1000, // WAIT 1 SECOND of silence before replying (was 500)
+                    threshold: 0.8, // 🛑 Strict threshold (0.6 -> 0.8) to ignore background noise
+                    prefix_padding_ms: 700, // Increased buffer (500 -> 700)
+                    silence_duration_ms: 1000, // WAIT 1 SECOND of silence before replying
                 } : null,
                 input_audio_transcription: {
                     model: "whisper-1"
@@ -371,7 +371,31 @@ ${deepDiveStep}
                 const userText = event.transcript || "";
                 const wordCount = userText.trim().split(/\s+/).length;
 
-                // 🧠 SMART BARGE-IN FILTER
+                // 🧠 NOISE FILTER / SHORT UTTERANCE IGNORE
+                // If text is very short (< 4 words) and contains filler, likely noise or backchannel
+                // We DELETE it to prevent AI from responding to "Ok", "Yeah", "Wait", [Background Noise]
+                const isShort = wordCount < 4;
+                const isImportantCommand = /stop|wait|hold|pause|cancel/i.test(userText); // Allow these even if short
+
+                if (isShort && !isImportantCommand) {
+                    console.log(`[Realtime] 🔇 Ignoring short utterance/noise ("${userText}"). Deleting item.`);
+
+                    // 1. Delete item so AI doesn't see it contextually
+                    this.wsOpenAI.send(JSON.stringify({
+                        type: "conversation.item.delete",
+                        item_id: event.item_id
+                    }));
+
+                    // 2. Cancel any response that might have started generating
+                    this.wsOpenAI.send(JSON.stringify({ type: "response.cancel" }));
+
+                    this.isInterruptionContext = false;
+                    this.potentialBackchannelId = null;
+                    return; // 🛑 Stop processing
+                }
+
+                // If valid speech, proceed
+                // 🧠 SMART BARGE-IN FILTER (Legacy logic preserved but Noise Filter usually catches it first)
                 // Refined Logic based on User Request: "IF (User_Input_Word_Count < 3) THEN Discard"
                 // ONLY if this was an interruption context.
                 if (this.isInterruptionContext && wordCount < 3 && userText.trim().length > 0) {
