@@ -30,7 +30,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private jobDescription: string = "";
     private durationMinutes: number = 15;
     private experience: string = "Junior";
-    private industry: string = "Technology";
+    private industry: string = ""; // Default to empty
 
     private region: string = "USA";
     private language: string = "English"; // 🌐 Default Language
@@ -150,9 +150,10 @@ export class OpenAIRealtimeSession implements IInterviewSession {
         }
 
         // --- 3. ASSEMBLE PROMPT ---
+        const industryPhrase = this.industry ? `in the ${this.industry} industry` : "";
         const dynamicInstructions = `
 # ROLE
-You are an experienced Hiring Manager at ${this.company} in the ${this.industry} industry.
+You are an experienced Hiring Manager at ${this.company} ${industryPhrase}.
 You are interviewing a candidate for the ${this.role} position (${this.experience} level) based in ${this.region}.
 Your goal is to assess technical fit and behavioral traits objectively. Maintain a professional, neutral demeanor.
 

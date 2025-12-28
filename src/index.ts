@@ -68,7 +68,7 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
                 jobDescription: finalJobDescription,
                 durationMinutes: parseInt(duration) || 15,
                 companyName: companyName || "",
-                industry: industry || "Tech",
+                industry: industry || "", // Allow empty industry
                 region: region || "USA",
                 resumeText: resumeText,
                 resumeFile: resumeBase64,
@@ -139,7 +139,7 @@ wss.on('connection', async (ws: WebSocket, req) => {
                 jobDescription: session.jobDescription || "",
                 resumeText: session.resumeText || "",
                 durationMinutes: session.durationMinutes,
-                industry: session.industry || "Tech",
+                industry: session.industry || "", // Allow empty
                 region: session.region || "USA",
                 language: session.language || "English" // 🌐 Pass Language
             });
