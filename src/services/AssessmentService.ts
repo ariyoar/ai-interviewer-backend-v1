@@ -65,24 +65,52 @@ export class AssessmentService {
         if (!ctx) throw new Error("Session not found");
 
         const prompt = `
-        Act as an Elite Interview Coach.
-        Role: ${ctx.role} (${ctx.seniority})
-        Expected Duration: ${ctx.durationMinutes} mins. Actual: ${ctx.actualDurationMinutes.toFixed(1)} mins.
+        Act as an Elite Interview Coach. 
 
-        TRANSCRIPT:
+        # OBJECTIVE
+        Provide a supportive, detailed post-interview debrief. Your goal is to help me 'ace' my next interview by transforming my current responses into high-impact, natural, and conversational narratives.
+
+        # CONTEXT
+        - Role: ${ctx.role}
+        - Seniority: ${ctx.seniority}
+        - Expected Duration: ${ctx.durationMinutes} mins. 
+        - Actual Duration: ${ctx.actualDurationMinutes.toFixed(1)} mins.
+
+        # TRANSCRIPT:
         ${ctx.transcriptText}
 
-        TASK:
-        1. **Pacing**: Did they fill the time with quality content or fluff?
-        2. **STAR Method**: For behavioral questions, did they use Situation-Task-Action-Result?
-        3. **Redo**: Identify the 3 weakest answers and write a "Better Version" script for them.
-        
-        OUTPUT JSON:
+        # TASK:
+        1. **Pacing**: Analyze if I filled the time with quality content. Provide advice on managing duration to show the depth expected for a ${ctx.seniority} role.
+        2. **STAR Method**: Check for Situation-Task-Action-Result. Use "You" to provide mentorship.
+        3. **The Golden Redo**: Identify my 3 weakest answers and write a "Golden Version" script for them. 
+
+        # GOLDEN VERSION GUIDELINES (Conversational Integrity):
+        - **Avoid Jargon**: Do not use "corporate speak" like 'orchestrated,' 'leveraged,' 'synergized,' or 'spearheaded.' 
+        - **Tone**: Keep it "Impactful but Natural." Use language that a person actually uses in a professional conversation (e.g., "I took the lead on," "I put together a plan to," "I made sure that").
+        - **Format**: Write in the first person ("I...").
+        - **Evidence**: Include specific timestamps (e.g., [02:15]) for the original answer.
+        - **Metrics**: Use placeholders like [X], [X]%, or $[X] for missing data.
+
+        # OUTPUT JSON:
         {
             "pacing_score": 1-10,
             "pacing_feedback": "string",
-            "star_analysis": [ { "question": "string", "has_result": boolean, "feedback": "string" } ],
-            "weakest_answers": [ { "original_summary": "string", "coached_version": "string (script)" } ]
+            "communication_style_tips": ["string (How to keep it conversational but professional)"], 
+            "star_analysis": [ 
+                { 
+                    "timestamp": "string",
+                    "question": "string", 
+                    "has_result": boolean, 
+                    "feedback": "string (Constructive mentorship using 'You')" 
+                } 
+            ],
+            "weakest_answers": [ 
+                { 
+                    "original_summary": "string", 
+                    "coached_version": "string (The high-impact conversational script)",
+                    "strategy_pro_tip": "string (Why this natural phrasing is effective for ${ctx.seniority})"
+                } 
+            ]
         }
         `;
 
@@ -103,32 +131,73 @@ export class AssessmentService {
         // Use custom rubric or default if missing
         const rubric = ctx.rubric || "Standard Technical Competence, Communication, and Culture Fit.";
 
-        const prompt = `
-        Act as a Senior Hiring Manager.
-        Role: ${ctx.role} (${ctx.seniority})
-        Rubric: ${rubric}
+        const hiringManagerPrompt = `
+        Act as a Senior Executive Recruiter and Talent Analyst.
 
-        TRANSCRIPT:
+        # OBJECTIVE
+        Provide a rigorous, evidence-based internal assessment of the candidate for the Hiring Manager. This report must act as a professional audit, identifying hiring signals, risks, and seniority alignment.
+
+        # CONTEXT
+        - Role: ${ctx.role}
+        - Seniority: ${ctx.seniority}
+        - Rubric Constraints: ${rubric}
+        - Expected Duration: ${ctx.durationMinutes} mins. 
+        - Actual Duration: ${ctx.actualDurationMinutes.toFixed(1)} mins.
+
+        # TRANSCRIPT WITH TIMESTAMPS:
         ${ctx.transcriptText}
 
-        TASK:
-        1. **Score**: Assign 1-5 for each competency in the rubric.
-        2. **Seniority Check**: Does their depth match ${ctx.seniority} level?
-        3. **Red Flags**: Any contradictions, lies, or major gaps?
+        # TASK:
+        1. **Executive Decision**: Provide an overall decision (STRONG_HIRE | HIRE | NO_HIRE | PROCEED_WITH_CAUTION).
+        2. **Rubric Evaluation**: Adhere strictly to the scoring in the Rubric. Every score MUST include a timestamp reference.
+        3. **Question-by-Question Assessment**: Review every exchange. Evaluate answer quality and identify the "Signal" (Positive/Negative).
+        4. **Authenticity & Communication Audit**: Flag if the candidate relies too heavily on corporate jargon/buzzwords (e.g., 'leveraging,' 'synergy,' 'orchestrating') instead of providing clear, conversational evidence of their work.
+        5. **Seniority & Behavioral Audit**: Analyze if the strategic depth matches a ${ctx.seniority} level.
+        6. **Risk Analysis**: List Red Flags with Severity levels (Low/Medium/High) and timestamps.
+        7. **Interview Playbook**: Suggest 3 targeted follow-up questions for the next round. Keep these questions direct and conversational.
 
-        OUTPUT JSON:
+        # EVALUATION GUIDELINES:
+        - Refer to the person being interviewed as "The Candidate."
+        - Be objective, critical, and direct. 
+        - Use timestamps for EVERY piece of evidence.
+
+        # OUTPUT JSON STRUCTURE:
         {
-            "overall_score": 1-5,
-            "decision": "STRONG_HIRE" | "HIRE" | "NO_HIRE",
-            "rubric_scores": [ { "category": "string", "score": number, "evidence": "string" } ],
-            "seniority_analysis": "string",
-            "red_flags": [ "string" ]
+            "summary": {
+                "decision": "string",
+                "overall_score": "string | number",
+                "justification": "string (Include key timestamps)",
+                "communication_style_note": "string (Note on whether they were conversational or overly scripted/jargon-heavy)"
+            },
+            "rubric_breakdown": [ 
+                { "category": "string", "score": "string | number", "evidence": "string", "timestamp": "string" } 
+            ],
+            "question_log": [
+                {
+                    "timestamp": "string",
+                    "question": "string",
+                    "answer_summary": "string",
+                    "signal": "Positive | Negative | Neutral",
+                    "critique": "string (Focus on the 'why' behind the signal)"
+                }
+            ],
+            "seniority_check": {
+                "matches_level": boolean,
+                "analysis": "string"
+            },
+            "red_flags": [ 
+                { "issue": "string", "severity": "Low | Medium | High", "details": "string", "timestamp": "string" } 
+            ],
+            "star_audit": { "clarity_score": 1-10, "missing_elements": ["string"], "analysis": "string" },
+            "next_round_playbook": [
+                { "topic": "string", "suggested_question": "string", "reason": "string" }
+            ]
         }
         `;
 
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
-            messages: [{ role: "system", content: prompt }],
+            messages: [{ role: "system", content: hiringManagerPrompt }],
             response_format: { type: "json_object" }
         });
 
