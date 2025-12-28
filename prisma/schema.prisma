@@ -22,6 +22,7 @@ model InterviewSession {
   jobDescription  String?  @db.Text // Use @db.Text for long content
   resumeText      String?  @db.Text
   resumeFile      String?  @db.Text  // The actual PDF file (Base64 encoded)
+  language        String   @default("English") // 🌐 Language Preference
   // ------------------
 
   type            AssessmentType @default(PRACTICE)

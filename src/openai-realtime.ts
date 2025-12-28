@@ -33,6 +33,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private industry: string = "Technology";
 
     private region: string = "USA";
+    private language: string = "English"; // 🌐 Default Language
     private isGreetingPhase: boolean = true;
     private startTime: number = Date.now(); // ⏱️ Start timer on instantiation
     private timeCheckInterval: NodeJS.Timeout | null = null; // ⏱️ Interval for time checks
@@ -59,6 +60,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
         if (context.durationMinutes) this.durationMinutes = context.durationMinutes;
         if (context.industry) this.industry = context.industry;
         if (context.region) this.region = context.region;
+        if (context.language) this.language = context.language; // 🌐 Set Language
         console.log(`[Realtime] Context injected manually for session ${this.sessionId}`);
     }
 
@@ -163,6 +165,11 @@ ${experienceStep}
 ${deepDiveStep}
 4. **Q&A (Remaining)**: Ask if they have questions for you. Answer them based on the company context.
 5. **Closing**: Thank them for their time and end the call.
+
+# LANGUAGE INSTRUCTION (CRITICAL)
+- **You must conduct this interview entirely in ${this.language}.**
+- Do NOT switch languages unless explicitly requested by the candidate.
+- If the candidate speaks a different language, politely remind them (in ${this.language}) that the interview is conducted in ${this.language}.
 
 # AUTHORITY GUARDRAILS (CRITICAL)
 - **You are the leader**: Do not ask the candidate what they want to talk about. You set the agenda.

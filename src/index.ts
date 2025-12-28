@@ -74,7 +74,8 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
                 resumeFile: resumeBase64,
                 // New Fields
                 type: (type as AssessmentType) || AssessmentType.PRACTICE,
-                rubric: rubric || ""
+                rubric: rubric || "",
+                language: req.body.language || "English" // 🌐 Save Language
             }
         });
 
@@ -139,7 +140,8 @@ wss.on('connection', async (ws: WebSocket, req) => {
                 resumeText: session.resumeText || "",
                 durationMinutes: session.durationMinutes,
                 industry: session.industry || "Tech",
-                region: session.region || "USA"
+                region: session.region || "USA",
+                language: session.language || "English" // 🌐 Pass Language
             });
 
             activeSessions.set(sid, realtimeSession);
