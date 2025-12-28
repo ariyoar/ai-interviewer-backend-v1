@@ -308,6 +308,9 @@ ${deepDiveStep}
                 console.log("[Realtime] User interruption detected.");
                 this.wsClient.send(JSON.stringify({ type: "interruption" }));
 
+                // ⏳ Clear Silence Timer (User is active)
+                this.clearSilenceTimer();
+
                 // 🧠 Capture Interruption Context
                 // If AI was speaking, this counts as a Barge-In scenario.
                 if (this.isAiSpeaking) {
@@ -332,6 +335,9 @@ ${deepDiveStep}
                     this.sendSessionUpdate(true); // Enable VAD
                     this.setupTimeTriggers();     // ⏱️ Start monitoring time
                 }
+
+                // ⏳ Start Silence Timer (waiting for user reply)
+                this.startSilenceTimer();
                 break;
 
             case "error":
@@ -491,5 +497,38 @@ ${deepDiveStep}
                 content: [{ type: "input_text", text: text }]
             }
         }));
+    }
+
+    // --- ⏳ SILENCE TIMEOUT LOGIC ---
+
+    private silenceTimeout: NodeJS.Timeout | null = null;
+    private readonly SILENCE_THRESHOLD_MS = 20000; // 20 seconds
+
+    private startSilenceTimer() {
+        this.clearSilenceTimer();
+
+        // Only start if VAD is active (not continuously greeting phase)
+        if (this.isGreetingPhase || !this.isOpenAIConnected) return;
+
+        this.silenceTimeout = setTimeout(() => {
+            console.log("[Realtime] ⏳ User silence detected. Nudging AI...");
+
+            // Inject a prompt to nudge the AI
+            this.injectSystemMessage("The candidate has been silent for 20 seconds. Gently ask if they are still there or if they need a moment to think. Be polite.");
+
+            // Force a response generation
+            this.wsOpenAI.send(JSON.stringify({
+                type: "response.create",
+                response: { modalities: ["text", "audio"] }
+            }));
+
+        }, this.SILENCE_THRESHOLD_MS);
+    }
+
+    private clearSilenceTimer() {
+        if (this.silenceTimeout) {
+            clearTimeout(this.silenceTimeout);
+            this.silenceTimeout = null;
+        }
     }
 }
