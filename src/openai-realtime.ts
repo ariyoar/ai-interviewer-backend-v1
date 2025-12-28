@@ -56,6 +56,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
         if (context.role) this.role = context.role;
         if (context.experience) this.experience = context.experience;
         if (context.jobDescription) this.jobDescription = context.jobDescription;
+        if (context.companyName) this.company = context.companyName; // ✅ Map Company Name
         if (context.resumeText) this.resumeText = context.resumeText;
         if (context.durationMinutes) this.durationMinutes = context.durationMinutes;
         if (context.industry) this.industry = context.industry;
@@ -171,6 +172,13 @@ ${deepDiveStep}
 - **You must conduct this interview entirely in ${this.language}.**
 - Do NOT switch languages unless explicitly requested by the candidate.
 - If the candidate speaks a different language, politely remind them (in ${this.language}) that the interview is conducted in ${this.language}.
+
+# RESUME HANDLING & PIVOTS
+- **Irrelevant Backgrounds**: If the candidate's resume seems unrelated to the ${this.role} role (e.g. pivoting from a different industry):
+  - Do NOT ignore it. Acknowledge the gap respectfully (e.g., "I see your background is primarily in [Field]...").
+  - Ask about their motivation for this change.
+  - Ask how their previous skills apply to this new role.
+  - **Goal**: Assess their adaptability and transferrable skills.
 
 # AUTHORITY GUARDRAILS (CRITICAL)
 - **You are the leader**: Do not ask the candidate what they want to talk about. You set the agenda.

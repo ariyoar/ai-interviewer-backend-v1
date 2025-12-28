@@ -141,6 +141,7 @@ wss.on('connection', async (ws: WebSocket, req) => {
                 durationMinutes: session.durationMinutes,
                 industry: session.industry || "", // Allow empty
                 region: session.region || "USA",
+                companyName: session.companyName || "", // ✅ Pass Company Name
                 language: session.language || "English" // 🌐 Pass Language
             });
 
