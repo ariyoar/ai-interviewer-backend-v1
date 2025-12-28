@@ -31,6 +31,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private durationMinutes: number = 15;
     private experience: string = "Junior";
     private industry: string = ""; // Default to empty
+    private companySize: string = ""; // 🏢 Default to empty
 
     private region: string = "USA";
     private language: string = "English"; // 🌐 Default Language
@@ -61,6 +62,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
         if (context.durationMinutes) this.durationMinutes = context.durationMinutes;
         if (context.industry) this.industry = context.industry;
         if (context.region) this.region = context.region;
+        if (context.companySize) this.companySize = context.companySize; // 🏢 Map Company Size
         if (context.language) this.language = context.language; // 🌐 Set Language
         console.log(`[Realtime] Context injected manually for session ${this.sessionId}`);
     }
@@ -125,6 +127,7 @@ export class OpenAIRealtimeSession implements IInterviewSession {
 - **Interview Duration**: ${this.durationMinutes} minutes.
 - **Region/Culture**: ${this.region}
 - **Industry Context**: ${this.industry}
+- **Company Size**: ${this.companySize || "Not specified"}
 `;
 
         // Add JD if valid

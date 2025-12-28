@@ -38,7 +38,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // --- API: CREATE SESSION ---
 app.post('/api/session', upload.single('resume'), async (req: any, res: any) => {
     try {
-        const { role, experience, jobDescription, description, duration, companyName, industry, region, type, rubric } = req.body;
+        const { role, experience, jobDescription, description, duration, companyName, industry, companySize, region, type, rubric } = req.body;
 
         // Handle both keys for backward compatibility
         const finalJobDescription = jobDescription || description || "";
@@ -69,6 +69,7 @@ app.post('/api/session', upload.single('resume'), async (req: any, res: any) => 
                 durationMinutes: parseInt(duration) || 15,
                 companyName: companyName || "",
                 industry: industry || "", // Allow empty industry
+                companySize: companySize || "", // 🏢 Save Company Size
                 region: region || "USA",
                 resumeText: resumeText,
                 resumeFile: resumeBase64,
@@ -140,6 +141,7 @@ wss.on('connection', async (ws: WebSocket, req) => {
                 resumeText: session.resumeText || "",
                 durationMinutes: session.durationMinutes,
                 industry: session.industry || "", // Allow empty
+                companySize: session.companySize || "", // 🏢 Pass Company Size
                 region: session.region || "USA",
                 companyName: session.companyName || "", // ✅ Pass Company Name
                 language: session.language || "English" // 🌐 Pass Language
