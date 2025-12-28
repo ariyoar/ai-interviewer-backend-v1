@@ -412,13 +412,13 @@ ${deepDiveStep}
             // 1. Clear Buffer
             this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
 
-            // 2. Inject User Message (Forces AI to Reply)
+            // 2. Inject System Command to Start (Avoids "Thank you for confirming..." robot response)
             this.wsOpenAI.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: {
                     type: "message",
-                    role: "user",
-                    content: [{ type: "input_text", text: "Hello, I am ready for the interview. Please introduce yourself." }]
+                    role: "system",
+                    content: [{ type: "input_text", text: "The user has joined the call. Start the interview now. Introduce yourself briefly and ask the first question." }]
                 }
             }));
 
