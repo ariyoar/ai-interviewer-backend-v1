@@ -412,13 +412,16 @@ ${deepDiveStep}
             // 1. Clear Buffer
             this.wsOpenAI.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
 
-            // 2. Inject System Command to Start (Avoids "Thank you for confirming..." robot response)
+            // 2. Inject System Command to Start
+            const companyPhrase = (this.company && this.company !== "our company") ? `at ${this.company}` : "at the company";
+            const greetingPrompt = `The user has joined. Start the interview now. Say exactly: "Hello! I'm the hiring manager for this ${this.role} role here ${companyPhrase}. How are you doing today? Are you ready to get started?"`;
+
             this.wsOpenAI.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: {
                     type: "message",
                     role: "system",
-                    content: [{ type: "input_text", text: "The user has joined the call. Start the interview now. Introduce yourself as the hiring manager (do not provide a personal name), ask how they are doing, and check if they are ready to begin." }]
+                    content: [{ type: "input_text", text: greetingPrompt }]
                 }
             }));
 
