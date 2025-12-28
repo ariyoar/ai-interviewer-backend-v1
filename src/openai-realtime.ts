@@ -418,7 +418,7 @@ ${deepDiveStep}
                 item: {
                     type: "message",
                     role: "system",
-                    content: [{ type: "input_text", text: "The user has joined the call. Start the interview now. Introduce yourself as the hiring manager (do not provide a personal name) and ask the first question." }]
+                    content: [{ type: "input_text", text: "The user has joined the call. Start the interview now. Introduce yourself as the hiring manager (do not provide a personal name), ask how they are doing, and check if they are ready to begin." }]
                 }
             }));
 
