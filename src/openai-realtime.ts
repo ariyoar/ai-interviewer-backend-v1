@@ -42,9 +42,12 @@ export class OpenAIRealtimeSession implements IInterviewSession {
     private isInterruptionContext: boolean = false; // 🔒 Only filter short inputs if it was an interruption
     private potentialBackchannelId: string | null = null;
 
-    constructor(wsClient: WebSocket, sessionId: string) {
+    private onClose: () => void;
+
+    constructor(wsClient: WebSocket, sessionId: string, onClose: () => void) {
         this.wsClient = wsClient;
         this.sessionId = sessionId;
+        this.onClose = onClose;
         // 🛑 REMOVED auto-init. logic moved to connect()
     }
 
@@ -502,33 +505,74 @@ ${deepDiveStep}
     // --- ⏳ SILENCE TIMEOUT LOGIC ---
 
     private silenceTimeout: NodeJS.Timeout | null = null;
-    private readonly SILENCE_THRESHOLD_MS = 20000; // 20 seconds
+    private silenceStage: number = 0; // 0=None, 1=Nudged, 2=Warned
 
     private startSilenceTimer() {
-        this.clearSilenceTimer();
+        this.clearSilenceTimer(false); // Clear timer but don't reset stage yet (logic handles refs)
 
         // Only start if VAD is active (not continuously greeting phase)
         if (this.isGreetingPhase || !this.isOpenAIConnected) return;
 
+        // Determine Duration based on Stage
+        // Stage 0 -> 20s -> Nudge
+        // Stage 1 -> 20s -> Warn (Ending in 30s)
+        // Stage 2 -> 30s -> Terminate
+        let duration = 20000;
+        if (this.silenceStage === 2) duration = 30000;
+
+        console.log(`[Realtime] ⏳ Starting Silence Timer (Stage ${this.silenceStage}): ${duration}ms`);
+
         this.silenceTimeout = setTimeout(() => {
-            console.log("[Realtime] ⏳ User silence detected. Nudging AI...");
-
-            // Inject a prompt to nudge the AI
-            this.injectSystemMessage("The candidate has been silent for 20 seconds. Gently ask if they are still there or if they need a moment to think. Be polite.");
-
-            // Force a response generation
-            this.wsOpenAI.send(JSON.stringify({
-                type: "response.create",
-                response: { modalities: ["text", "audio"] }
-            }));
-
-        }, this.SILENCE_THRESHOLD_MS);
+            this.handleSilenceTimeout();
+        }, duration);
     }
 
-    private clearSilenceTimer() {
+    private handleSilenceTimeout() {
+        console.log(`[Realtime] ⏳ Silence Timeout Triggered (Stage ${this.silenceStage})`);
+
+        if (this.silenceStage === 0) {
+            // Stage 0 -> 1: Polite Nudge
+            this.injectSystemMessage("The candidate has been silent for 20 seconds. Gently ask if they are still there or if they need a moment.");
+            this.forceAiResponse();
+            this.silenceStage = 1;
+            this.startSilenceTimer(); // Restart for next stage
+
+        } else if (this.silenceStage === 1) {
+            // Stage 1 -> 2: Final Warning
+            this.injectSystemMessage("The candidate is still silent. State clearly: 'Since I haven't heard from you, I will end the call in 30 seconds if there is no response.'");
+            this.forceAiResponse();
+            this.silenceStage = 2; // Next timeout will look for 30s
+            this.startSilenceTimer();
+
+        } else if (this.silenceStage === 2) {
+            // Stage 2 -> End: Terminate
+            console.log("[Realtime] 🛑 max silence reached. Terminating session.");
+            // Assuming `activeSessions` is a Map passed to or accessible by this class instance
+            // and `sessionId` is a property of this class.
+            // If not, this line will need adjustment based on how sessions are managed.
+            // For example, if this class is the session itself, it might emit an event.
+            // For now, assuming `activeSessions` is available.
+            // this.activeSessions.delete(this.sessionId); // Uncomment and adapt if session management is external
+            this.wsClient.send(JSON.stringify({ type: "error", message: "Session ended due to inactivity." }));
+            this.close();
+            this.onClose(); // Notify parent to remove from map
+        }
+    }
+
+    private forceAiResponse() {
+        this.wsOpenAI.send(JSON.stringify({
+            type: "response.create",
+            response: { modalities: ["text", "audio"] }
+        }));
+    }
+
+    private clearSilenceTimer(resetStage: boolean = true) {
         if (this.silenceTimeout) {
             clearTimeout(this.silenceTimeout);
             this.silenceTimeout = null;
+        }
+        if (resetStage) {
+            this.silenceStage = 0;
         }
     }
 }

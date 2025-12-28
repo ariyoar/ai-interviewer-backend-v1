@@ -128,7 +128,10 @@ wss.on('connection', async (ws: WebSocket, req) => {
             }
 
             // Init Realtime Session
-            realtimeSession = new OpenAIRealtimeSession(ws, sid);
+            realtimeSession = new OpenAIRealtimeSession(ws, sid, () => {
+                console.log(`[Session] Self-terminating session ${sid}`);
+                activeSessions.delete(sid);
+            });
             realtimeSession.setContext({
                 role: session.role,
                 experience: session.experience,
