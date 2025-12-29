@@ -134,7 +134,7 @@ export class AssessmentService {
         const rawJson = JSON.parse(response.choices[0].message.content || "{}");
 
         // 🛡️ SAFEGUARD: Ensure all arrays exist to prevent Frontend Crashes (TypeError: cannot read 'map')
-        return {
+        const finalJson = {
             executive_summary: {
                 overall_performance: rawJson.executive_summary?.overall_performance || "No data available.",
                 superpowers: rawJson.executive_summary?.superpowers || [],
