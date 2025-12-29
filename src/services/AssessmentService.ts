@@ -68,7 +68,7 @@ export class AssessmentService {
         Act as an Elite Interview Coach. 
 
         # OBJECTIVE
-        Provide a supportive, detailed post-interview debrief. Your goal is to help me 'ace' my next interview by transforming my current responses into high-impact, natural, and conversational narratives.
+        Provide a supportive, detailed post-interview debrief. Transform my current responses into high-impact, natural narratives. Use a helpful, mentor-like tone.
 
         # CONTEXT
         - Role: ${ctx.role}
@@ -80,37 +80,48 @@ export class AssessmentService {
         ${ctx.transcriptText}
 
         # TASK:
-        1. **Pacing**: Analyze if I filled the time with quality content. Provide advice on managing duration to show the depth expected for a ${ctx.seniority} role.
-        2. **STAR Method**: Check for Situation-Task-Action-Result. Use "You" to provide mentorship.
-        3. **The Golden Redo**: Identify my 3 weakest answers and write a "Golden Version" script for them. 
-
-        # GOLDEN VERSION GUIDELINES (Conversational Integrity):
-        - **Avoid Jargon**: Do not use "corporate speak" like 'orchestrated,' 'leveraged,' 'synergized,' or 'spearheaded.' 
-        - **Tone**: Keep it "Impactful but Natural." Use language that a person actually uses in a professional conversation (e.g., "I took the lead on," "I put together a plan to," "I made sure that").
-        - **Format**: Write in the first person ("I...").
-        - **Evidence**: Include specific timestamps (e.g., [02:15]) for the original answer.
-        - **Metrics**: Use placeholders like [X], [X]%, or $[X] for missing data.
+        1. **Executive Coaching Summary**: Summarize my overall performance. Identify my 2-3 "Superpowers" and my 2-3 "Critical Growth Areas."
+        2. **Chronological Question Breakdown**: Review every single question in the transcript. For each:
+           - Provide the **verbatim answer** I gave.
+           - Assign a **Signal** (Positive, Neutral, Warning, Negative).
+           - Provide a **detailed description** of the "vibe" and what that answer signaled to the interviewer.
+        3. **The Golden Redo**: Identify the 3 weakest answers. For each, write a "Golden Version" script using first-person, natural language (no jargon like 'leveraged' or 'orchestrated').
+        4. **Action Plan**: Provide a 3-step concrete plan for what I should do before my next interview to improve.
 
         # OUTPUT JSON:
         {
-            "pacing_score": 1-10,
-            "pacing_feedback": "string",
-            "communication_style_tips": ["string (How to keep it conversational but professional)"], 
-            "star_analysis": [ 
-                { 
+            "executive_summary": {
+                "overall_performance": "string",
+                "superpowers": ["string"],
+                "growth_areas": ["string"],
+                "readiness_score": "1-100"
+            },
+            "pacing_and_style": {
+                "score": 1-10,
+                "feedback": "string",
+                "tips": ["string"]
+            },
+            "chronological_analysis": [
+                {
                     "timestamp": "string",
+                    "question": "string",
+                    "your_verbatim_answer": "string",
+                    "signal": "Positive | Neutral | Warning | Negative",
+                    "detailed_critique": "string"
+                }
+            ],
+            "top_3_redos": [ 
+                { 
                     "question": "string", 
-                    "has_result": boolean, 
-                    "feedback": "string (Constructive mentorship using 'You')" 
+                    "why_it_failed": "string",
+                    "golden_version": "string",
+                    "strategy_pro_tip": "string"
                 } 
             ],
-            "weakest_answers": [ 
-                { 
-                    "original_summary": "string", 
-                    "coached_version": "string (The high-impact conversational script)",
-                    "strategy_pro_tip": "string (Why this natural phrasing is effective for ${ctx.seniority})"
-                } 
-            ]
+            "action_plan": {
+                "summary": "string",
+                "steps": ["string"]
+            }
         }
         `;
 
