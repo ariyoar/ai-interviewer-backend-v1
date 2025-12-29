@@ -131,7 +131,28 @@ export class AssessmentService {
             response_format: { type: "json_object" }
         });
 
-        return JSON.parse(response.choices[0].message.content || "{}");
+        const rawJson = JSON.parse(response.choices[0].message.content || "{}");
+
+        // 🛡️ SAFEGUARD: Ensure all arrays exist to prevent Frontend Crashes (TypeError: cannot read 'map')
+        return {
+            executive_summary: {
+                overall_performance: rawJson.executive_summary?.overall_performance || "No data available.",
+                superpowers: rawJson.executive_summary?.superpowers || [],
+                growth_areas: rawJson.executive_summary?.growth_areas || [],
+                readiness_score: rawJson.executive_summary?.readiness_score || "N/A"
+            },
+            pacing_and_style: {
+                score: rawJson.pacing_and_style?.score || 0,
+                feedback: rawJson.pacing_and_style?.feedback || "No feedback generated.",
+                tips: rawJson.pacing_and_style?.tips || []
+            },
+            chronological_analysis: rawJson.chronological_analysis || [],
+            top_3_redos: rawJson.top_3_redos || [],
+            action_plan: {
+                summary: rawJson.action_plan?.summary || "No plan generated.",
+                steps: rawJson.action_plan?.steps || []
+            }
+        };
     }
 
     // --- 3. COMPANY SCREENING PROCESSOR ---
