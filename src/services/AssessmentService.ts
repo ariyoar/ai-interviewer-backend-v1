@@ -81,11 +81,11 @@ export class AssessmentService {
 
         # TASK:
         1. **Executive Coaching Summary**: Summarize my overall performance. Identify my 2-3 "Superpowers" and my 2-3 "Critical Growth Areas."
-        2. **Chronological Question Breakdown**: Review every single question in the transcript. For each:
-           - Provide the **verbatim answer** I gave.
-           - Assign a **Signal** (Positive, Neutral, Warning, Negative).
-           - Provide a **detailed description** of the "vibe" and what that answer signaled to the interviewer.
-        3. **The Golden Redo**: Identify the 3 weakest answers. For each, write a "Golden Version" script using first-person, natural language (no jargon like 'leveraged' or 'orchestrated').
+        2. **Chronological Question Breakdown**: Review every single question. For EACH exchange:
+           - **question**: The exact question asking by the AI.
+           - **your_verbatim_answer**: A representative snippet of my actual answer.
+           - **detailed_critique**: Write 3-4 sentences analyzing my tone, content clarity, and specific missing signals. Do NOT be vague. explain WHY it was good or bad.
+        3. **The Golden Redo**: Identify the 3 weakest answers. For each, write a "Golden Version" script using first-person, natural language.
         4. **Action Plan**: Provide a 3-step concrete plan for what I should do before my next interview to improve.
 
         # OUTPUT JSON:
@@ -104,10 +104,10 @@ export class AssessmentService {
             "chronological_analysis": [
                 {
                     "timestamp": "string",
-                    "question": "string",
-                    "your_verbatim_answer": "string",
+                    "question": "string (The exact question asked)",
+                    "your_verbatim_answer": "string (Quote the user)",
                     "signal": "Positive | Neutral | Warning | Negative",
-                    "detailed_critique": "string"
+                    "detailed_critique": "string (3-4 sentences deep dive)"
                 }
             ],
             "top_3_redos": [ 
