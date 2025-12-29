@@ -27,7 +27,12 @@ model InterviewSession {
   // ------------------
 
   type            AssessmentType @default(PRACTICE)
+  type            AssessmentType @default(PRACTICE)
   rubric          String?        @db.Text // For SCREENING mode
+  
+  // 📊 Assessment Persistence
+  coachingReport  Json?          // Stores the generated Coaching Assessment
+  screeningReport Json?          // Stores the generated Screening Assessment
 
   status          String   @default("ready") // "ready", "active", "completed"
 
