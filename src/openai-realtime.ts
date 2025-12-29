@@ -255,6 +255,10 @@ ${deepDiveStep}
             type: "input_audio_buffer.append",
             audio: base64Audio
         }));
+
+        // 🟢 FIX: Reset silence timer while user is streaming audio
+        // This prevents the AI from thinking the user is silent during long monologues
+        this.clearSilenceTimer();
     }
 
     private async saveTranscript(role: 'candidate' | 'interviewer', text: string) {
@@ -560,11 +564,11 @@ ${deepDiveStep}
         if (this.isGreetingPhase || !this.isOpenAIConnected) return;
 
         // Determine Duration based on Stage
-        // Stage 0 -> 20s -> Nudge
-        // Stage 1 -> 20s -> Warn (Ending in 30s)
+        // Stage 0 -> 45s (previously 20s) -> Nudge
+        // Stage 1 -> 30s -> Warn (Ending in 30s)
         // Stage 2 -> 30s -> Terminate
-        let duration = 20000;
-        if (this.silenceStage === 2) duration = 30000;
+        let duration = 45000;
+        if (this.silenceStage > 0) duration = 30000;
 
         console.log(`[Realtime] ⏳ Starting Silence Timer (Stage ${this.silenceStage}): ${duration}ms`);
 
@@ -578,7 +582,7 @@ ${deepDiveStep}
 
         if (this.silenceStage === 0) {
             // Stage 0 -> 1: Polite Nudge
-            this.injectSystemMessage("The candidate has been silent for 20 seconds. Gently ask if they are still there or if they need a moment.");
+            this.injectSystemMessage("The candidate has been silent for 45 seconds. Gently ask if they are still there or if they need a moment.");
             this.forceAiResponse();
             this.silenceStage = 1;
             this.startSilenceTimer(); // Restart for next stage
