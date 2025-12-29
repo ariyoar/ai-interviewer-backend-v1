@@ -283,6 +283,9 @@ ${deepDiveStep}
     }
 
     private handleOpenAIEvent(event: any) {
+        // 🔬 PROOF VIA LOGS: Log every single event type
+        console.log(`[OpenAI Event] ${event.type}`);
+
         // 🔍 DEBUG: Log expected vs unexpected ends
         if (event.type === 'response.done' && !event.response?.output) {
             console.log("[Realtime] Response finished (potentially empty).");
@@ -378,6 +381,14 @@ ${deepDiveStep}
             case "conversation.item.input_audio_transcription.completed":
                 // 🗣️ User Speech Transcribed
                 const userText = event.transcript || "";
+
+                // 🔍 DEBUG: Forward to Frontend so they can see what OpenAI heard
+                this.wsClient.send(JSON.stringify({
+                    type: "user_transcript",
+                    text: userText,
+                    isFinal: true
+                }));
+
                 const wordCount = userText.trim().split(/\s+/).length;
 
                 // 🧠 NOISE FILTER / SHORT UTTERANCE IGNORE
