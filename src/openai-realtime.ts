@@ -229,10 +229,9 @@ ${deepDiveStep}
                 output_audio_format: "pcm16",
                 turn_detection: enableVAD ? {
                     type: "server_vad",
-                    type: "server_vad",
-                    threshold: 0.7, // ⚖️ Balanced threshold (0.6 too sensitive, 0.8 too strict)
+                    threshold: 0.7,
                     prefix_padding_ms: 700,
-                    silence_duration_ms: 2000, // ⏳ Increased to 2 SECONDS (was 1s) to allow thinking pauses
+                    silence_duration_ms: 3000, // ⏳ Increased to 3 SECONDS (was 2s) for relaxed pausing
                 } : null,
                 input_audio_transcription: {
                     model: "whisper-1"
