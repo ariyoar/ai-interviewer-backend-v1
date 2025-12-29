@@ -213,6 +213,11 @@ ${deepDiveStep}
    - Use "Okay", "Noted".
    - Avoid excessive praise.
 
+# SMART NUDGE (CRITICAL)
+- **Incomplete Thoughts**: If the user stops speaking but the sentence is grammatically incomplete (e.g., "And then I...", "So the reason is..."):
+  - 🛑 **DO NOT** ask a new question or pivot.
+  - ✅ **INSTEAD**: Output a "Minimal Encourager" like "Mm-hmm?", "Go on.", or "And?" to prompt them to finish.
+
 # OUTPUT FORMAT
 - Speak naturally but professionally.
 - Do NOT output markdown.
@@ -231,7 +236,7 @@ ${deepDiveStep}
                     type: "server_vad",
                     threshold: 0.7,
                     prefix_padding_ms: 700,
-                    silence_duration_ms: 3000, // ⏳ Increased to 3 SECONDS (was 2s) for relaxed pausing
+                    silence_duration_ms: 2000, // ⏳ Reverted to 2 SECONDS ("Goldilocks zone")
                 } : null,
                 input_audio_transcription: {
                     model: "whisper-1"
