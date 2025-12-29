@@ -153,6 +153,14 @@ export class AssessmentService {
                 steps: rawJson.action_plan?.steps || []
             }
         };
+
+        // 💾 PERSISTENCE: Save to DB
+        await prisma.interviewSession.update({
+            where: { id: sessionId },
+            data: { coachingReport: finalJson as any }
+        });
+
+        return finalJson;
     }
 
     // --- 3. COMPANY SCREENING PROCESSOR ---
@@ -233,6 +241,14 @@ export class AssessmentService {
             response_format: { type: "json_object" }
         });
 
-        return JSON.parse(response.choices[0].message.content || "{}");
+        const finalJson = JSON.parse(response.choices[0].message.content || "{}");
+
+        // 💾 PERSISTENCE: Save to DB
+        await prisma.interviewSession.update({
+            where: { id: sessionId },
+            data: { screeningReport: finalJson as any }
+        });
+
+        return finalJson;
     }
 }

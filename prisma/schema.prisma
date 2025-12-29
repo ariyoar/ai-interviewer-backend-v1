@@ -27,7 +27,7 @@ model InterviewSession {
   // ------------------
 
   type            AssessmentType @default(PRACTICE)
-  type            AssessmentType @default(PRACTICE)
+
   rubric          String?        @db.Text // For SCREENING mode
   
   // 📊 Assessment Persistence
