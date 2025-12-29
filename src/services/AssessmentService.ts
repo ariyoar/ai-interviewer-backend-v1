@@ -86,7 +86,9 @@ export class AssessmentService {
            - **your_verbatim_answer**: A representative snippet of my actual answer.
            - **detailed_critique**: Write 3-4 sentences analyzing my tone, content clarity, and specific missing signals. Do NOT be vague. explain WHY it was good or bad.
         3. **The Golden Redo**: Identify the 3 weakest answers. For each, write a "Golden Version" script using first-person, natural language.
-        4. **Action Plan**: Provide a 3-step concrete plan for what I should do before my next interview to improve.
+        4. **Action Plan**: Provide a structured plan.
+           - **immediate_focus**: List 2-3 urgent improvements to make NOW.
+           - **long_term_development**: List 2-3 broader skills to develop over time.
 
         # OUTPUT JSON:
         {
@@ -119,8 +121,8 @@ export class AssessmentService {
                 } 
             ],
             "action_plan": {
-                "summary": "string",
-                "steps": ["string"]
+                "immediate_focus": ["string"],
+                "long_term_development": ["string"]
             }
         }
         `;
@@ -149,8 +151,8 @@ export class AssessmentService {
             chronological_analysis: rawJson.chronological_analysis || [],
             top_3_redos: rawJson.top_3_redos || [],
             action_plan: {
-                summary: rawJson.action_plan?.summary || "No plan generated.",
-                steps: rawJson.action_plan?.steps || []
+                immediate_focus: rawJson.action_plan?.immediate_focus || [],
+                long_term_development: rawJson.action_plan?.long_term_development || []
             }
         };
 
