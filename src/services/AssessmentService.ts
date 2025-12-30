@@ -14,7 +14,10 @@ interface AssessmentContext {
     resumeText: string;
     jobDescription: string;
     type: string;
+    jobDescription: string;
+    type: string;
     rubric?: string;
+    location?: string; // 🌍 Added for context wrapper
 }
 
 export class AssessmentService {
@@ -55,7 +58,8 @@ export class AssessmentService {
             resumeText: session.resumeText || "",
             jobDescription: session.jobDescription || "",
             type: session.type,
-            rubric: session.rubric || undefined
+            rubric: session.rubric || undefined,
+            location: session.region || "Remote"
         };
     }
 
