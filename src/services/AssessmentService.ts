@@ -14,8 +14,6 @@ interface AssessmentContext {
     resumeText: string;
     jobDescription: string;
     type: string;
-    jobDescription: string;
-    type: string;
     rubric?: string;
     location?: string; // 🌍 Added for context wrapper
 }
